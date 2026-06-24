@@ -473,6 +473,14 @@ app.get('/api/settings', async (req, res) => {
     rows.forEach(r => {
       settings[r.key] = r.value;
     });
+    
+    // Fallback settings for anonymous/unauthenticated requests to bypass frontend wizard redirection
+    if (!settings.clinicName) {
+      settings.clinicName = 'DATAGRIS Clinic';
+      settings.doctorName = 'Doctor';
+      settings.useInventory = 'true';
+    }
+    
     res.json(settings);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -577,14 +585,16 @@ app.post('/api/setup/wizard', async (req, res) => {
 });
 
 function getBillingUrl() {
+  if (process.env.BILLING_APP_URL) return process.env.BILLING_APP_URL;
+  if (process.env.BILLING_URL) return process.env.BILLING_URL;
   try {
     const configPath = path.join(process.env.USER_DATA_PATH || __dirname, 'clinic_config.json');
     if (fs.existsSync(configPath)) {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      return config.billingUrl || 'https://billing.datagris.com';
+      return config.billingUrl || 'https://clinic.datagris.com';
     }
   } catch (e) {}
-  return 'https://billing.datagris.com';
+  return 'https://clinic.datagris.com';
 }
 
 // 2. Authentication
