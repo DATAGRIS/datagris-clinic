@@ -3080,3 +3080,11 @@ async function startServer() {
 module.exports = {
   startServer
 };
+
+if (require.main === module) {
+  startServer().catch(err => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}
+
