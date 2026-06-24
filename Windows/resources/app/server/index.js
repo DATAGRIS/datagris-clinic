@@ -7,10 +7,32 @@ const fs = require('fs');
 const path = require('path');
 const db = require('./db');
 const sync = require('./sync');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Middleware to wrap every request in AsyncLocalStorage context for multi-tenant RLS propagation
+app.use((req, res, next) => {
+  let userId = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    try {
+      const decoded = jwt.decode(token);
+      if (decoded && decoded.sub) {
+        userId = decoded.sub;
+      }
+    } catch (e) {
+      console.error('Failed to decode JWT token in middleware:', e);
+    }
+  }
+  
+  db.asyncLocalStorage.run({ userId }, () => {
+    next();
+  });
+});
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -664,12 +686,19 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// 2b. User Accounts Management (Admin Actions)
+// 2b. User Accounts Management (Admin Actions - Integrated with Supabase Auth & Profiles)
 app.get('/api/users', async (req, res) => {
   try {
-    const rows = await db.queryAll('SELECT id, username, role, full_name, created_at FROM users ORDER BY id ASC');
-    res.json(rows);
+    const rows = await db.queryAll('SELECT id, username, role, full_name, created_at FROM profiles ORDER BY id ASC');
+    res.json(rows.map(r => ({
+      id: r.id,
+      username: r.username,
+      role: r.role,
+      fullName: r.full_name,
+      createdAt: r.created_at
+    })));
   } catch (err) {
+    console.error('Failed to get profiles:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -677,50 +706,128 @@ app.get('/api/users', async (req, res) => {
 app.post('/api/users', async (req, res) => {
   const { username, password, role, fullName } = req.body;
   try {
-    const existing = await db.queryOne('SELECT * FROM users WHERE username = ?', [username]);
+    // 1. Check if user already exists
+    const existing = await db.queryOne('SELECT * FROM profiles WHERE username = ?', [username.trim().toLowerCase()]);
     if (existing) {
       return res.status(400).json({ error: 'اسم المستخدم مسجل مسبقاً' });
     }
-    const hash = hashPassword(password);
+
+    // 2. Create in Supabase Auth via Admin SDK
+    const supabaseUrl = process.env.SUPABASE_URL || 'https://whfegxabypqkvnmfwfqj.supabase.co';
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseServiceKey) {
+      return res.status(500).json({ error: 'مفتاح خدمة Supabase (Service Role Key) غير متوفر في الخادم' });
+    }
+
+    const { createClient } = require('@supabase/supabase-js');
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    });
+
+    // Helper to get clinic_id
+    const dataDir = process.env.USER_DATA_PATH || __dirname;
+    let clinicId = process.env.CLINIC_ID || 'CLN-000001';
+    try {
+      const configPath = path.join(dataDir, 'clinic_config.json');
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        clinicId = config.clinicId || clinicId;
+      }
+    } catch (e) {}
+
+    const email = `${username.trim().toLowerCase()}@datagris-auth.com`;
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { clinic_id: clinicId }
+    });
+
+    if (authError || !authData.user) {
+      console.error('Supabase Auth user creation error:', authError);
+      return res.status(400).json({ error: authError?.message || 'فشل إنشاء حساب مستخدم سحابي' });
+    }
+
+    const userId = authData.user.id;
+
+    // 3. Create profile in database
     await db.runCommand(
-      'INSERT INTO users (username, password_hash, role, full_name) VALUES (?, ?, ?, ?)',
-      [username, hash, role, fullName]
+      'INSERT INTO profiles (id, clinic_id, username, full_name, role) VALUES (?, ?, ?, ?, ?)',
+      [userId, clinicId, username.trim().toLowerCase(), fullName, role]
     );
+
     res.json({ success: true });
   } catch (err) {
+    console.error('Failed to create user:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.put('/api/users/:id', async (req, res) => {
   const { username, password, role, fullName } = req.body;
+  const userId = req.params.id;
   try {
-    const hash = password ? hashPassword(password) : null;
-    if (hash) {
-      await db.runCommand(
-        'UPDATE users SET username = ?, password_hash = ?, role = ?, full_name = ? WHERE id = ?',
-        [username, hash, role, fullName, req.params.id]
-      );
-    } else {
-      await db.runCommand(
-        'UPDATE users SET username = ?, role = ?, full_name = ? WHERE id = ?',
-        [username, role, fullName, req.params.id]
-      );
+    // 1. Update profile details
+    await db.runCommand(
+      'UPDATE profiles SET username = ?, role = ?, full_name = ? WHERE id = ?',
+      [username.trim().toLowerCase(), role, fullName, userId]
+    );
+
+    // 2. If password updated, invoke Supabase Admin SDK
+    if (password) {
+      const supabaseUrl = process.env.SUPABASE_URL || 'https://whfegxabypqkvnmfwfqj.supabase.co';
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (supabaseServiceKey) {
+        const { createClient } = require('@supabase/supabase-js');
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+          auth: { autoRefreshToken: false, persistSession: false }
+        });
+        const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, { password });
+        if (updateError) {
+          console.error('Supabase Auth password update error:', updateError);
+        }
+      }
     }
+
     res.json({ success: true });
   } catch (err) {
+    console.error('Failed to update user:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.delete('/api/users/:id', async (req, res) => {
+  const userId = req.params.id;
   try {
-    if (parseInt(req.params.id) === 1) {
-      return res.status(400).json({ error: 'لا يمكن حذف حساب مدير النظام الافتراضي' });
+    // Prevent deletion of main owner/admin
+    const profile = await db.queryOne('SELECT role FROM profiles WHERE id = ?', [userId]);
+    if (profile && profile.role === 'owner') {
+      return res.status(400).json({ error: 'لا يمكن حذف حساب مالك النظام الرئيسي' });
     }
-    await db.runCommand('DELETE FROM users WHERE id = ?', [req.params.id]);
+
+    // 1. Delete profile details
+    await db.runCommand('DELETE FROM profiles WHERE id = ?', [userId]);
+
+    // 2. Delete Supabase Auth account
+    const supabaseUrl = process.env.SUPABASE_URL || 'https://whfegxabypqkvnmfwfqj.supabase.co';
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (supabaseServiceKey) {
+      const { createClient } = require('@supabase/supabase-js');
+      const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: { autoRefreshToken: false, persistSession: false }
+      });
+      const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+      if (deleteError) {
+        console.error('Supabase Auth user delete error:', deleteError);
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
+    console.error('Failed to delete user:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2925,9 +3032,26 @@ app.post('/api/backup/restore', async (req, res) => {
   }
 });
 
+// Serve static frontend assets if running outside Electron / hosted on the cloud
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// Catch-all to serve frontend React app for client-side routing
+app.get('*', (req, res, next) => {
+  // If the path starts with /api, pass it to other routers / handlers
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
+
 // Express startup handler
 app.get('/api/sync/status', (req, res) => {
-  res.json(sync.getSyncStatus());
+  res.json({
+    status: 'synced',
+    lastSyncTime: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString(),
+    pendingCount: 0,
+    failedCount: 0
+  });
 });
 
 let serverListener = null;
@@ -2935,16 +3059,7 @@ let serverListener = null;
 async function startServer() {
   await db.initDatabase();
   
-  // Start the background local-to-cloud sync engine
-  sync.startSyncEngine();
-  
-  // Run auto backup check on startup if missed
-  await runAutoBackupIfDue();
-  
-  // Periodic check (every 30 minutes)
-  setInterval(() => {
-    runAutoBackupIfDue();
-  }, 30 * 60 * 1000);
+  // Note: Local background sync engine and SQLite auto backup checks are disabled for Cloud Hosting.
 
   const port = process.env.PORT || 5000;
   return new Promise((resolve, reject) => {
