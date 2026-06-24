@@ -54,7 +54,7 @@ async function initDatabase() {
 
   // Final fallback if everything else fails
   if (!connectionString) {
-    connectionString = "postgresql://postgres.whfegxabypqkvnmfwfqj:linic06062026%40@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?pgbouncer=true";
+    connectionString = "postgresql://postgres.whfegxabypqkvnmfwfqj:linic06062026%40@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?pgbouncer=true";
   }
 
   pool = new Pool({
