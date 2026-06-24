@@ -1,0 +1,49 @@
+{
+  "name": "clinic-operating-system",
+  "version": "1.0.0",
+  "description": "Clinic Operating System - ERP and Workflow management for Egyptian Clinics",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node start-dev.js",
+    "build": "vite build",
+    "start": "electron .",
+    "package": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "lucide-react": "^0.435.0",
+    "mysql2": "^3.11.0",
+    "pdfkit": "^0.15.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sql.js": "^1.14.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^8.2.2",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "electron-packager": "^17.1.2",
+    "vite": "^5.4.2"
+  },
+  "build": {
+    "appId": "com.egyptianclinic.os",
+    "productName": "Clinic Operating System",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "main.js",
+      "preload.js",
+      "server/**/*"
+    ],
+    "win": {
+      "target": "portable",
+      "requestedExecutionLevel": "asInvoker"
+    }
+  }
+}

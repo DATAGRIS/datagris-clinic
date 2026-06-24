@@ -1,0 +1,46 @@
+# ====================================================
+# ROOT .GITIGNORE - CLINIC MANAGEMENT SYSTEM (SAAS)
+# ====================================================
+
+# 1. Recursive Node Modules (Prevents committing npm packages)
+**/node_modules/
+.pnp
+.pnp.*
+
+# 2. Local Databases & Logs (Security: Prevents leaking patient records)
+**/*.db
+**/*.db-journal
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/clinic.db
+**/clinic_config.json
+**/app.log
+
+# 3. Environment Variables & Secret Files (Security: Prevents leaking credentials)
+**/.env
+**/.env.local
+**/.env.development.local
+**/.env.test.local
+**/.env.production.local
+**/pw_section.txt
+**/pw_toggle_raw.txt
+**/qph_area_hex.txt
+**/snippet_debug.txt
+**/wa_templates.txt
+
+# 4. Next.js Build Outputs (Billing website)
+billing/.next/
+billing/out/
+
+# 5. Electron Build Outputs (Desktop application)
+**/dist-electron/
+**/win-unpacked/
+Windows/resources/app/dist-electron/
+**/*.exe
+
+# 6. Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
