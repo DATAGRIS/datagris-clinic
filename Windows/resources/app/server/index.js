@@ -13,10 +13,10 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Parse request userId from cookies and propagate context for PostgreSQL row-level security (RLS)
+// Parse request userId from headers or cookies and propagate context for PostgreSQL row-level security (RLS)
 app.use((req, res, next) => {
-  let userId = null;
-  if (req.headers.cookie) {
+  let userId = req.headers['x-user-id'] || null;
+  if (!userId && req.headers.cookie) {
     const match = req.headers.cookie.match(/userId=([^;]+)/);
     if (match) {
       userId = match[1];
