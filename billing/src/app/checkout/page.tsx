@@ -347,7 +347,11 @@ function CheckoutContent() {
                 cursor: 'pointer',
                 height: '48px',
                 borderRadius: '8px',
-                marginTop: '32px'
+                marginTop: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '0 28px'
               }}
               disabled={loading}
             >
