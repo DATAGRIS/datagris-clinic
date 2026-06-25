@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     payment_transaction_id VARCHAR(255),
     payment_amount DOUBLE PRECISION,
     payment_currency VARCHAR(50),
+    whatsapp_api_key TEXT,
+    whatsapp_provider VARCHAR(100) DEFAULT 'meta',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );

@@ -103,6 +103,22 @@ async function getSystemSettings() {
       }
       settings[r.key] = val;
     });
+
+    // Also load WhatsApp API key and provider from subscriptions table if available
+    try {
+      const sub = await db.queryOne('SELECT whatsapp_api_key, whatsapp_provider FROM subscriptions LIMIT 1');
+      if (sub) {
+        if (sub.whatsapp_api_key) {
+          settings['whatsappAccessToken'] = secureCrypto.decrypt(sub.whatsapp_api_key);
+        }
+        if (sub.whatsapp_provider) {
+          settings['whatsappProvider'] = sub.whatsapp_provider;
+        }
+      }
+    } catch (subErr) {
+      // Safe fallback if table/columns don't exist on local SQLite
+    }
+
     return settings;
   } catch (err) {
     console.error('Error fetching settings:', err);
