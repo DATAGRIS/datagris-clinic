@@ -13,6 +13,13 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Serve static files from React dist directory
+const distPath = path.join(__dirname, '../dist');
+if (fs.existsSync(distPath)) {
+  console.log(`Serving static files from: ${distPath}`);
+  app.use(express.static(distPath));
+}
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -3130,6 +3137,19 @@ app.post('/api/backup/restore', async (req, res) => {
   } catch (err) {
     console.error('Backup restore error:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Serve index.html for all non-API GET requests (SPA fallback routing)
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  const indexHtml = path.join(distPath, 'index.html');
+  if (fs.existsSync(indexHtml)) {
+    res.sendFile(indexHtml);
+  } else {
+    res.status(404).send('Not Found');
   }
 });
 
