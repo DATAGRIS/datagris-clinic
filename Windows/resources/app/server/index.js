@@ -13,6 +13,14 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Anti-caching middleware for all API requests to prevent session caching bugs
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 // Parse request userId from headers or cookies and propagate context for PostgreSQL row-level security (RLS)
 app.use((req, res, next) => {
   let userId = req.headers['x-user-id'] || null;
@@ -646,44 +654,38 @@ app.get('/api/settings', async (req, res) => {
 app.post('/api/settings', async (req, res) => {
   try {
     const settings = req.body;
+    const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+    const isMysql = db.getDbType() === 'mysql';
+
     for (const [key, val] of Object.entries(settings)) {
       let valueToStore = String(val);
       if (['whatsappAccessToken', 'whatsappPhoneNumberId', 'whatsappBusinessAccountId'].includes(key)) {
         valueToStore = secureCrypto.encrypt(valueToStore);
       }
-      await db.runCommand(
-        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?',
-        [key, valueToStore, valueToStore]
-      );
+
+      if (isPostgres) {
+        await db.runCommand(
+          'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (clinic_id, key) DO UPDATE SET value = EXCLUDED.value',
+          [key, valueToStore]
+        );
+      } else if (isMysql) {
+        await db.runCommand(
+          'INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?',
+          [key, valueToStore, valueToStore]
+        );
+      } else {
+        await db.runCommand(
+          'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+          [key, valueToStore]
+        );
+      }
     }
     // Log audit
     await db.logAudit(1, 'system', 'UPDATE_SETTINGS', 'Updated clinic settings');
     res.json({ success: true });
   } catch (err) {
-    // If MySQL is used, ON CONFLICT is different: REPLACE INTO or INSERT INTO ... ON DUPLICATE KEY UPDATE
-    try {
-      const settings = req.body;
-      for (const [key, val] of Object.entries(settings)) {
-        let valueToStore = String(val);
-        if (['whatsappAccessToken', 'whatsappPhoneNumberId', 'whatsappBusinessAccountId'].includes(key)) {
-          valueToStore = secureCrypto.encrypt(valueToStore);
-        }
-        if (db.getDbType() === 'mysql') {
-          await db.runCommand(
-            'INSERT INTO settings (\`key\`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?',
-            [key, valueToStore, valueToStore]
-          );
-        } else {
-          await db.runCommand(
-            'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-            [key, valueToStore]
-          );
-        }
-      }
-      res.json({ success: true });
-    } catch (innerErr) {
-      res.status(500).json({ error: innerErr.message });
-    }
+    console.error('Error saving settings:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -711,6 +713,8 @@ app.get('/api/whatsapp/logs', async (req, res) => {
 app.post('/api/setup/wizard', async (req, res) => {
   try {
     const { clinicSettings, adminUser } = req.body;
+    const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+    const isMysql = db.getDbType() === 'mysql';
     
     // Save settings
     for (const [key, val] of Object.entries(clinicSettings)) {
@@ -718,9 +722,15 @@ app.post('/api/setup/wizard', async (req, res) => {
       if (['whatsappAccessToken', 'whatsappPhoneNumberId', 'whatsappBusinessAccountId'].includes(key)) {
         valueToStore = secureCrypto.encrypt(valueToStore);
       }
-      if (db.getDbType() === 'mysql') {
+
+      if (isPostgres) {
         await db.runCommand(
-          'INSERT INTO settings (\`key\`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?',
+          'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (clinic_id, key) DO UPDATE SET value = EXCLUDED.value',
+          [key, valueToStore]
+        );
+      } else if (isMysql) {
+        await db.runCommand(
+          'INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?',
           [key, valueToStore, valueToStore]
         );
       } else {
@@ -806,8 +816,17 @@ app.post('/api/auth/login', async (req, res) => {
       const authData = await authResponse.json();
       const userId = authData.user.id;
 
-      // Fetch user profile from PostgreSQL (RLS is bypassed during login because we query without session claims context, making this lookup robust)
-      const profile = await db.queryOne('SELECT * FROM profiles WHERE id = ?', [userId]);
+      // Fetch user profile from PostgreSQL inside runWithUser context to set RLS claims
+      const profile = await new Promise((resolve, reject) => {
+        db.runWithUser(userId, async () => {
+          try {
+            const p = await db.queryOne('SELECT * FROM profiles WHERE id = ?', [userId]);
+            resolve(p);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
       
       if (!profile) {
         return res.status(404).json({ error: 'لم يتم العثور على ملف تعريف المستخدم الخاص بك' });

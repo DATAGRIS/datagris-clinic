@@ -212,12 +212,17 @@ function translateSqlToPostgres(sql) {
 
   // Replace SQLite INSERT OR IGNORE / INSERT OR REPLACE
   translated = translated.replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO');
-  if (sql.includes('INSERT OR IGNORE INTO')) {
+  translated = translated.replace(/INSERT OR REPLACE INTO/gi, 'INSERT INTO');
+  if (sql.includes('INSERT OR IGNORE INTO') || sql.includes('INSERT OR REPLACE INTO')) {
     if (!translated.toLowerCase().includes('on conflict')) {
       if (translated.includes('visit_services')) {
         translated += ' ON CONFLICT (visit_id, service_id) DO NOTHING';
       } else if (translated.includes('settings')) {
-        translated += ' ON CONFLICT (clinic_id, key) DO NOTHING';
+        if (sql.includes('INSERT OR REPLACE INTO')) {
+          translated += ' ON CONFLICT (clinic_id, key) DO UPDATE SET value = EXCLUDED.value';
+        } else {
+          translated += ' ON CONFLICT (clinic_id, key) DO NOTHING';
+        }
       } else {
         translated += ' ON CONFLICT DO NOTHING';
       }
