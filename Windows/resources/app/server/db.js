@@ -87,7 +87,7 @@ async function initDatabase() {
           console.warn(`Warning: Admin profile not found for clinic ${clinicId}`);
         }
       } else {
-        console.warn('Warning: CLINIC_ID env variable is not set!');
+        console.log('Database running in multi-tenant mode (no static CLINIC_ID set).');
       }
 
       await configurePostgresDefaults(client);

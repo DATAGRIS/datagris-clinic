@@ -94,9 +94,6 @@ export default function PricingPage() {
     <div className="pricing-section">
       <div className="hero">
         <h1 style={{ fontFamily: 'var(--font-ar)' }}>{t.heroTitle}</h1>
-        <p className="subtitle-en" style={{ fontSize: '1.25rem', marginBottom: '16px', color: 'var(--primary)', fontWeight: 600 }}>
-          {t.heroSubtitle}
-        </p>
         <p style={{ fontFamily: 'var(--font-ar)', maxWidth: '650px', margin: '0 auto', color: 'var(--text-muted)' }}>
           {t.heroDesc}
         </p>

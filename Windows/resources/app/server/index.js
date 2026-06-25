@@ -780,10 +780,8 @@ app.post('/api/auth/login', async (req, res) => {
       const authData = await authResponse.json();
       const userId = authData.user.id;
 
-      // Fetch user profile from PostgreSQL (run with user context to bypass empty session RLS filter)
-      const profile = await db.runWithUser(userId, () =>
-        db.queryOne('SELECT * FROM profiles WHERE id = ?', [userId])
-      );
+      // Fetch user profile from PostgreSQL (RLS is bypassed during login because we query without session claims context, making this lookup robust)
+      const profile = await db.queryOne('SELECT * FROM profiles WHERE id = ?', [userId]);
       
       if (!profile) {
         return res.status(404).json({ error: 'لم يتم العثور على ملف تعريف المستخدم الخاص بك' });

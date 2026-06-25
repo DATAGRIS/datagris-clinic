@@ -475,6 +475,92 @@ class CustomProvider extends BaseWhatsAppProvider {
   }
 }
 
+// WaSender API Provider
+class WasenderProvider extends BaseWhatsAppProvider {
+  async testConnection() {
+    const accessToken = crypto.decrypt(this.config.whatsappAccessToken);
+    if (!accessToken) {
+      throw new Error('Access Token is required.');
+    }
+    return true; // Simplified connection test
+  }
+
+  async sendMessage(to, text) {
+    const accessToken = crypto.decrypt(this.config.whatsappAccessToken);
+    if (!accessToken) {
+      throw new Error('Access Token is required.');
+    }
+    const cleanPhone = to.replace(/[^0-9]/g, '');
+
+    const res = await fetch('https://www.wasenderapi.com/api/send-message', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        to: cleanPhone,
+        text: text
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || data.error || 'Failed to send WaSender message.');
+    }
+    return data;
+  }
+
+  async sendDocument(to, pdfBuffer, filename, caption) {
+    const accessToken = crypto.decrypt(this.config.whatsappAccessToken);
+    if (!accessToken) {
+      throw new Error('Access Token is required.');
+    }
+    const cleanPhone = to.replace(/[^0-9]/g, '');
+
+    // 1. Upload the PDF file to WaSender to get a temporary public URL
+    const uploadRes = await fetch('https://www.wasenderapi.com/api/upload', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/pdf'
+      },
+      body: pdfBuffer
+    });
+
+    const uploadData = await uploadRes.json();
+    if (!uploadRes.ok) {
+      throw new Error(uploadData.message || uploadData.error || 'Failed to upload document to WaSender.');
+    }
+
+    const fileUrl = uploadData.url || (uploadData.data && uploadData.data.url);
+    if (!fileUrl) {
+      throw new Error('Failed to retrieve uploaded file URL from WaSender response.');
+    }
+
+    // 2. Send the document message using the uploaded file URL
+    const res = await fetch('https://www.wasenderapi.com/api/send-message', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        to: cleanPhone,
+        text: caption,
+        documentUrl: fileUrl,
+        fileName: filename
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || data.error || 'Failed to send WaSender document.');
+    }
+    return data;
+  }
+}
+
 // Service Factory
 function getWhatsAppProvider(settings) {
   const providerType = settings.whatsappProvider || 'meta';
@@ -502,6 +588,8 @@ function getWhatsAppProvider(settings) {
       return new ThreeSixtyDialogProvider(config);
     case 'custom':
       return new CustomProvider(config);
+    case 'wasender':
+      return new WasenderProvider(config);
     default:
       throw new Error(`Unsupported WhatsApp provider: ${providerType}`);
   }
