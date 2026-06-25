@@ -1,12 +1,14 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useState, Suspense } from 'react';
-import Link from 'next/link';
+import { useState, useEffect, Suspense } from 'react';
+import { useBilling } from '../BillingContext';
 
 function CheckoutContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { lang } = useBilling();
+  
   const existingClinicId = searchParams.get('clinic') || '';
   const initialPlan = searchParams.get('plan') || 'trial';
 
@@ -20,62 +22,82 @@ function CheckoutContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Pro WhatsApp Request State
-  const [waRequesting, setWaRequesting] = useState(false);
-  const [waRequested, setWaRequested] = useState(false);
-  const [waMessage, setWaMessage] = useState('');
+  // Success Modal State
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [nextUrl, setNextUrl] = useState('');
 
-  // Request WhatsApp API activation via company email
-  const handleRequestWhatsApp = async () => {
-    if (!clinicName && !existingClinicId) {
-      setError('يرجى كتابة اسم العيادة أولاً لتفعيل طلب الواتساب / Please fill clinic name first');
-      return;
+  // Synchronize plan state when search param changes (e.g. clicking trial link in header)
+  useEffect(() => {
+    const p = searchParams.get('plan');
+    if (p) {
+      setPlan(p);
+      setError('');
     }
-    if (!mobile || mobile.length < 10) {
-      setError('يرجى كتابة رقم هاتف الواتساب الصحيح للعيادة / Please write a valid WhatsApp mobile number');
-      return;
-    }
-    if (!existingClinicId && !username) {
-      setError('يرجى كتابة اسم مستخدم المدير / Please write owner username');
-      return;
-    }
+  }, [searchParams]);
 
-    setWaRequesting(true);
-    setError('');
-    try {
-      const res = await fetch('/api/subscription/request-activation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clinicId: existingClinicId || 'CLN-NEW',
-          clinicName: clinicName || `تجديد عيادة ${existingClinicId}`,
-          mobile: mobile,
-          username: username || 'admin'
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error('فشل إرسال طلب التفعيل للشركة');
-      }
-
-      setWaRequested(true);
-      setWaMessage('✅ تم إرسال طلب تفعيل API الواتساب بنجاح لشركة DATAGRIS! سيتم تفعيل حساب الـ API وتزويدك برمز الاستجابة السريعة QR للمسح والربط خلال 1 إلى 3 أيام عمل. يمكنك الآن المتابعة لإتمام الدفع.');
-    } catch (err: any) {
-      setError(err.message || 'حدث خطأ أثناء إرسال طلب واتساب');
-    } finally {
-      setWaRequesting(false);
+  // Translations
+  const t = {
+    ar: {
+      registerTitle: 'تسجيل عيادة جديدة',
+      upgradeTitle: 'تجديد وترقية الاشتراك',
+      selectPlan: 'اختر الخطة المطلوبة',
+      selectPlanTrial: 'باقة تجريبية - 7 أيام مجاناً (0 ج.م)',
+      selectPlanBasic: 'الباقة الأساسية - سنوي (3,000 ج.م)',
+      selectPlanPro: 'الباقة الاحترافية - سنوي (5,000 ج.م)',
+      clinicLabel: 'اسم العيادة',
+      clinicPlaceholder: 'مثال: عيادة داتا جريس الطبية',
+      doctorLabel: 'اسم الطبيب بالكامل',
+      doctorPlaceholder: 'مثال: د. أحمد ياسر',
+      phoneLabel: 'رقم الهاتف (الواتساب)',
+      phonePlaceholder: '010XXXXXXXX',
+      usernameLabel: 'اسم مستخدم المدير',
+      usernamePlaceholder: 'مثال: admin_clinic',
+      passwordLabel: 'كلمة المرور',
+      passwordPlaceholder: '••••••••',
+      submitLoading: 'جاري معالجة طلبك...',
+      submitTrial: 'إنشاء حساب تجريبي مجاني',
+      submitPaid: 'إنشاء الحساب والمتابعة للدفع',
+      errorHeading: 'حدث خطأ',
+      successHeading: 'تم بنجاح',
+      proSuccessMsg: 'تم إرسال طلب تفعيل الواتساب بنجاح لشركة DATAGRIS! يرجى الانتظار من 1 إلى 3 أيام عمل لتفعيل الخدمة. اضغط التالي لإتمام عملية الدفع.',
+      basicSuccessMsg: 'تم إنشاء طلب الحساب بنجاح! اضغط التالي لإتمام عملية الدفع.',
+      trialSuccessMsg: 'تم إنشاء الحساب التجريبي بنجاح! سيتم تحويلك الآن لتسجيل الدخول.',
+      nextBtn: 'التالي',
+      loginBtn: 'تسجيل الدخول'
+    },
+    en: {
+      registerTitle: 'Register New Clinic',
+      upgradeTitle: 'Upgrade & Renew Subscription',
+      selectPlan: 'Select Desired Plan',
+      selectPlanTrial: '7-Day Free Trial (0 EGP)',
+      selectPlanBasic: 'Basic Plan - Annual (3,000 EGP)',
+      selectPlanPro: 'Pro Plan - Annual (5,000 EGP)',
+      clinicLabel: 'Clinic Name',
+      clinicPlaceholder: 'e.g., Datagris Medical Clinic',
+      doctorLabel: "Doctor's Full Name",
+      doctorPlaceholder: 'e.g., Dr. Ahmed Yaser',
+      phoneLabel: 'Phone Number (WhatsApp)',
+      phonePlaceholder: '010XXXXXXXX',
+      usernameLabel: 'Owner Username',
+      usernamePlaceholder: 'e.g., admin_clinic',
+      passwordLabel: 'Password',
+      passwordPlaceholder: '••••••••',
+      submitLoading: 'Processing your request...',
+      submitTrial: 'Create Free Trial Account',
+      submitPaid: 'Create Account & Proceed to Payment',
+      errorHeading: 'An error occurred',
+      successHeading: 'Success',
+      proSuccessMsg: 'WhatsApp activation request successfully sent to DATAGRIS! Please allow 1-3 business days to activate the service. Click Next to proceed to payment.',
+      basicSuccessMsg: 'Account request created successfully! Click Next to proceed to payment.',
+      trialSuccessMsg: 'Trial account created successfully! Redirecting you to the login page.',
+      nextBtn: 'Next',
+      loginBtn: 'Login'
     }
-  };
+  }[lang];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // If Pro plan and WhatsApp request is not done, require it first
-    if (plan === 'pro' && !waRequested) {
-      setError('الرجاء الضغط على زر "تفعيل طلب الواتساب" أولاً للتحقق من رقم API وإرساله للشركة');
-      return;
-    }
-
     setLoading(true);
     setError('');
 
@@ -99,8 +121,11 @@ function CheckoutContent() {
         }
 
         const data = await res.json();
-        // Redirect to Paymob iframe URL
-        window.location.href = data.url;
+        
+        // Exclude trial check for existing upgrade, directly show modal or redirect
+        setSuccessMessage(plan === 'pro' ? t.proSuccessMsg : t.basicSuccessMsg);
+        setNextUrl(data.url);
+        setShowSuccessModal(true);
       } else {
         // Registration flow for new clinic
         const regRes = await fetch('/api/auth/register', {
@@ -123,11 +148,35 @@ function CheckoutContent() {
 
         const regData = await regRes.json(); // { success: true, clinicId }
 
+        // If Pro plan, trigger WhatsApp activation notification email in background
+        if (plan === 'pro') {
+          try {
+            await fetch('/api/subscription/request-activation', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                clinicId: regData.clinicId,
+                clinicName,
+                mobile,
+                username
+              })
+            });
+          } catch (mailErr) {
+            console.error('Failed to trigger background activation notification:', mailErr);
+          }
+        }
+
         if (plan === 'trial') {
-          // Redirect directly to success page for trials
-          router.push('/payment-success?type=trial');
+          setSuccessMessage(t.trialSuccessMsg);
+          setNextUrl('https://clinic.datagris.com');
+          setShowSuccessModal(true);
+          
+          // Auto redirect after 4 seconds
+          setTimeout(() => {
+            window.location.href = 'https://clinic.datagris.com';
+          }, 4000);
         } else {
-          // Redirect to checkout payment for paid registration
+          // Fetch Paymob redirect URL
           const res = await fetch('/api/checkout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -145,7 +194,9 @@ function CheckoutContent() {
           }
 
           const data = await res.json();
-          window.location.href = data.url;
+          setSuccessMessage(plan === 'pro' ? t.proSuccessMsg : t.basicSuccessMsg);
+          setNextUrl(data.url);
+          setShowSuccessModal(true);
         }
       }
     } catch (err: any) {
@@ -156,244 +207,200 @@ function CheckoutContent() {
     }
   };
 
+  const handleModalNext = () => {
+    window.location.href = nextUrl;
+  };
+
   return (
-    <div className="checkout-split-layout">
-      {/* Left panel - Branding and Tech features */}
-      <div className="checkout-visual-panel">
-        <div className="visual-overlay"></div>
-        <div className="visual-content">
-          <Link href="/" style={{ display: 'inline-block', marginBottom: '40px' }}>
-            <img src="/datagris_light.png" alt="DATAGRIS Logo" style={{ height: '70px', objectFit: 'contain' }} />
-          </Link>
-          <h2 style={{ fontSize: '2.2rem', fontWeight: 800, lineHeight: 1.3, marginBottom: '24px', fontFamily: 'var(--font-ar)' }}>
-            منصة داتا جريس الطبية المتكاملة
-          </h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '1.1rem', marginBottom: '40px', fontFamily: 'var(--font-ar)' }}>
-            شريكك الذكي في إدارة العيادات والمراكز الطبية. انضم لأكثر من 500 طبيب يثقون في أنظمتنا يومياً.
-          </p>
-
-          <div className="features-showcase-grid">
-            <div className="showcase-item">
-              <div className="icon-wrapper">📂</div>
-              <div>
-                <h4 style={{ fontFamily: 'var(--font-ar)' }}>ملفات طبية رقمية ذكية</h4>
-                <p style={{ fontFamily: 'var(--font-ar)' }}>تسجيل الروشتات، الكشف المباشر، المؤشرات الحيوية المخصصة والتاريخ المرضي للعيادة.</p>
-              </div>
-            </div>
-
-            <div className="showcase-item">
-              <div className="icon-wrapper">💸</div>
-              <div>
-                <h4 style={{ fontFamily: 'var(--font-ar)' }}>إدارة الخزينة والرواتب</h4>
-                <p style={{ fontFamily: 'var(--font-ar)' }}>إصدار سندات القبض والصرف، جرد الخزينة اليومي وحساب أرباح العيادة التلقائي.</p>
-              </div>
-            </div>
-
-            <div className="showcase-item">
-              <div className="icon-wrapper">💬</div>
-              <div>
-                <h4 style={{ fontFamily: 'var(--font-ar)' }}>نظام إرسال الواتساب التلقائي</h4>
-                <p style={{ fontFamily: 'var(--font-ar)' }}>تنبيهات فورية للمرضى، إرسال الروشتة إلكترونياً، وإحالات فورية للصيدليات والمعامل.</p>
-              </div>
-            </div>
-
-            <div className="showcase-item">
-              <div className="icon-wrapper">📦</div>
-              <div>
-                <h4 style={{ fontFamily: 'var(--font-ar)' }}>إدارة المخزون والمستلزمات</h4>
-                <p style={{ fontFamily: 'var(--font-ar)' }}>تنبيهات انخفاض مستوى المخزون، ربط استهلاك المستلزمات الطبية تلقائياً بالكشوفات.</p>
-              </div>
-            </div>
-          </div>
+    <div style={{ display: 'flex', minHeight: '100vh', width: '100%', background: 'var(--bg-app)', alignItems: 'center', justifyContent: 'center', padding: '40px 20px' }}>
+      <div style={{ maxWidth: '560px', width: '100%' }}>
+        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-main)', fontFamily: 'var(--font-ar)', marginBottom: '8px' }}>
+            {existingClinicId ? t.upgradeTitle : t.registerTitle}
+          </h1>
         </div>
-      </div>
 
-      {/* Right panel - Form card */}
-      <div className="checkout-form-panel">
-        <div style={{ maxWidth: '520px', width: '100%', padding: '20px' }}>
-          <div className="mb-24">
-            <h1 style={{ fontSize: '1.75rem', fontFamily: 'var(--font-ar)' }}>
-              {existingClinicId ? 'تجديد وترقية الاشتراك' : 'تسجيل عيادة جديدة'}
-            </h1>
-            <p className="subtitle-en" style={{ fontSize: '0.95rem', color: 'var(--text-muted)' }}>
-              {existingClinicId ? `Upgrade Clinic Account: ${existingClinicId}` : 'Register your clinic & configure SaaS Plan'}
-            </p>
-          </div>
+        <div className="form-card" style={{ background: 'var(--bg-card)', padding: '36px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }}>
+          {error && (
+            <div className="checkout-error-banner" style={{ textAlign: 'start' }}>
+              ⚠️ {error}
+            </div>
+          )}
 
-          <div className="form-card" style={{ background: 'var(--bg-card)', padding: '30px' }}>
-            {error && (
-              <div className="checkout-error-banner">
-                ⚠️ {error}
-              </div>
-            )}
+          <form onSubmit={handleSubmit} style={{ textAlign: 'start' }}>
+            {/* Plan select */}
+            <div className="form-group">
+              <label style={{ fontFamily: 'var(--font-ar)' }}>{t.selectPlan}</label>
+              <select
+                className="form-control"
+                value={plan}
+                onChange={(e) => {
+                  setPlan(e.target.value);
+                  setError('');
+                }}
+                disabled={loading || !!searchParams.get('plan')}
+                style={{ height: '46px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
+              >
+                {!existingClinicId && <option value="trial">{t.selectPlanTrial}</option>}
+                <option value="basic">{t.selectPlanBasic}</option>
+                <option value="pro">{t.selectPlanPro}</option>
+              </select>
+            </div>
 
-            {waMessage && (
-              <div className="checkout-success-banner">
-                {waMessage}
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit}>
-              {/* Plan select */}
+            {existingClinicId ? (
               <div className="form-group">
-                <label style={{ fontFamily: 'var(--font-ar)' }}>اختر الخطة المطلوبة / Plan Selection</label>
-                <select
+                <label style={{ fontFamily: 'var(--font-ar)' }}>{t.phoneLabel}</label>
+                <input
+                  type="tel"
                   className="form-control"
-                  value={plan}
-                  onChange={(e) => {
-                    setPlan(e.target.value);
-                    setWaRequested(false);
-                    setError('');
-                  }}
-                  disabled={loading || !!searchParams.get('plan')}
-                >
-                  {!existingClinicId && <option value="trial">باقة تجريبية - 7 أيام مجاناً / 7-Day Free Trial (0 EGP)</option>}
-                  <option value="basic">الباقة الأساسية - سنوي (3000 EGP) / Basic Annual</option>
-                  <option value="pro">الباقة الاحترافية - سنوي (5000 EGP) / Pro Annual</option>
-                </select>
+                  required
+                  placeholder={t.phonePlaceholder}
+                  value={mobile}
+                  onChange={(e) => setMobile(e.target.value)}
+                  disabled={loading}
+                  style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
+                />
               </div>
-
-              {existingClinicId ? (
+            ) : (
+              <>
                 <div className="form-group">
-                  <label style={{ fontFamily: 'var(--font-ar)' }}>رقم هاتف الواتساب أو الدفع / Mobile Number</label>
+                  <label style={{ fontFamily: 'var(--font-ar)' }}>{t.clinicLabel}</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    required
+                    placeholder={t.clinicPlaceholder}
+                    value={clinicName}
+                    onChange={(e) => setClinicName(e.target.value)}
+                    disabled={loading}
+                    style={{ height: '46px' }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontFamily: 'var(--font-ar)' }}>{t.doctorLabel}</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    required
+                    placeholder={t.doctorPlaceholder}
+                    value={doctorName}
+                    onChange={(e) => setDoctorName(e.target.value)}
+                    disabled={loading}
+                    style={{ height: '46px' }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontFamily: 'var(--font-ar)' }}>{t.phoneLabel}</label>
                   <input
                     type="tel"
                     className="form-control"
                     required
-                    placeholder="010XXXXXXXX"
+                    placeholder={t.phonePlaceholder}
                     value={mobile}
                     onChange={(e) => setMobile(e.target.value)}
                     disabled={loading}
-                    style={{ direction: 'ltr', textAlign: 'left' }}
+                    style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
                   />
                 </div>
-              ) : (
-                <>
-                  <div className="form-group">
-                    <label style={{ fontFamily: 'var(--font-ar)' }}>اسم العيادة / Clinic Name</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      required
-                      placeholder="مثال: عيادة داتا جريس الطبية"
-                      value={clinicName}
-                      onChange={(e) => setClinicName(e.target.value)}
-                      disabled={loading}
-                    />
-                  </div>
 
-                  <div className="form-group">
-                    <label style={{ fontFamily: 'var(--font-ar)' }}>اسم الطبيب / Doctor's Full Name</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      required
-                      placeholder="مثال: د. أحمد ياسر"
-                      value={doctorName}
-                      onChange={(e) => setDoctorName(e.target.value)}
-                      disabled={loading}
-                    />
-                  </div>
+                <hr style={{ border: 0, borderTop: '1px solid var(--border-color)', margin: '24px 0' }} />
 
-                  <div className="form-group">
-                    <label style={{ fontFamily: 'var(--font-ar)' }}>رقم الهاتف (الواتساب) / Phone Number</label>
-                    <input
-                      type="tel"
-                      className="form-control"
-                      required
-                      placeholder="010XXXXXXXX"
-                      value={mobile}
-                      onChange={(e) => setMobile(e.target.value)}
-                      disabled={loading}
-                      style={{ direction: 'ltr', textAlign: 'left' }}
-                    />
-                  </div>
-
-                  <hr style={{ border: 0, borderTop: '1px solid var(--border-color)', margin: '20px 0' }} />
-
-                  <div className="form-group">
-                    <label style={{ fontFamily: 'var(--font-ar)' }}>اسم مستخدم المدير / Owner Username</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      required
-                      placeholder="مثال: owner_name"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      disabled={loading}
-                      style={{ direction: 'ltr', textAlign: 'left' }}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label style={{ fontFamily: 'var(--font-ar)' }}>كلمة المرور / Password</label>
-                    <input
-                      type="password"
-                      className="form-control"
-                      required
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      disabled={loading}
-                      style={{ direction: 'ltr', textAlign: 'left' }}
-                    />
-                  </div>
-                </>
-              )}
-
-              {/* Pro plan activation workflow triggers */}
-              {plan === 'pro' && (
-                <div style={{ marginTop: '20px', marginBottom: '20px' }}>
-                  <button
-                    type="button"
-                    onClick={handleRequestWhatsApp}
-                    className="btn-card btn-card-secondary"
-                    style={{
-                      width: '100%',
-                      backgroundColor: waRequested ? 'rgba(34, 197, 94, 0.15)' : 'rgba(99, 102, 241, 0.15)',
-                      borderColor: waRequested ? '#22c55e' : 'var(--primary)',
-                      color: waRequested ? '#22c55e' : 'white',
-                      fontWeight: 'bold',
-                      fontFamily: 'var(--font-ar)'
-                    }}
-                    disabled={waRequesting}
-                  >
-                    {waRequesting ? 'جاري إرسال طلب التفعيل...' : waRequested ? '✓ تم تفعيل طلب الواتساب بنجاح' : 'خطوة 1: طلب تفعيل نظام الواتساب'}
-                  </button>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '8px', textAlign: 'center', fontFamily: 'var(--font-ar)' }}>
-                    * لخطط البرو، يجب إرسال طلب التفعيل للتحقق من ربط الـ API بالشركة قبل الدفع.
-                  </p>
+                <div className="form-group">
+                  <label style={{ fontFamily: 'var(--font-ar)' }}>{t.usernameLabel}</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    required
+                    placeholder={t.usernamePlaceholder}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    disabled={loading}
+                    style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
+                  />
                 </div>
-              )}
 
-              {/* Submit triggers */}
-              <button
-                type="submit"
-                className="form-submit"
-                style={{
-                  fontFamily: 'var(--font-ar)',
-                  backgroundColor: (plan === 'pro' && !waRequested) ? 'rgba(255,255,255,0.05)' : 'var(--primary)',
-                  cursor: (plan === 'pro' && !waRequested) ? 'not-allowed' : 'pointer'
-                }}
-                disabled={loading || (plan === 'pro' && !waRequested)}
-              >
-                {loading
-                  ? 'جاري معالجة طلبك...'
-                  : plan === 'trial'
-                  ? 'إنشاء حساب تجريبي مجاني'
-                  : 'التالي: الانتقال لبوابة الدفع الإلكتروني'}
-              </button>
-            </form>
-          </div>
+                <div className="form-group">
+                  <label style={{ fontFamily: 'var(--font-ar)' }}>{t.passwordLabel}</label>
+                  <input
+                    type="password"
+                    className="form-control"
+                    required
+                    placeholder={t.passwordPlaceholder}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={loading}
+                    style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              className="form-submit"
+              style={{
+                fontFamily: 'var(--font-ar)',
+                backgroundColor: 'var(--primary)',
+                cursor: 'pointer',
+                height: '48px',
+                borderRadius: '8px',
+                marginTop: '32px'
+              }}
+              disabled={loading}
+            >
+              {loading
+                ? t.submitLoading
+                : plan === 'trial'
+                ? t.submitTrial
+                : t.submitPaid}
+            </button>
+          </form>
         </div>
       </div>
+
+      {/* Success Modal Popup with Blurred Background */}
+      {showSuccessModal && (
+        <div className="custom-modal-overlay" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
+          <div className="custom-modal-card" style={{ maxWidth: '440px', padding: '32px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
+            <div style={{ fontSize: '3rem', marginBottom: '16px' }}>
+              {plan === 'trial' ? '🎉' : '🔔'}
+            </div>
+            
+            <h3 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '12px', fontFamily: 'var(--font-ar)' }}>
+              {t.successHeading}
+            </h3>
+            
+            <p style={{ fontSize: '1rem', color: 'var(--text-main)', lineHeight: 1.6, marginBottom: '24px', fontFamily: 'var(--font-ar)' }}>
+              {successMessage}
+            </p>
+            
+            <button 
+              onClick={handleModalNext}
+              className="form-submit"
+              style={{
+                marginTop: '0',
+                padding: '12px 24px',
+                borderRadius: '8px',
+                fontSize: '1rem',
+                backgroundColor: 'var(--primary)',
+                fontFamily: 'var(--font-ar)'
+              }}
+            >
+              {plan === 'trial' ? t.loginBtn : t.nextBtn}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 export default function CheckoutPage() {
   return (
-    <Suspense fallback={<div className="text-center" style={{ padding: '60px' }}>Loading checkout data...</div>}>
+    <Suspense fallback={<div className="text-center" style={{ padding: '60px', color: 'var(--text-muted)' }}>Loading checkout data...</div>}>
       <CheckoutContent />
     </Suspense>
   );

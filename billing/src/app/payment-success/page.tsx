@@ -10,7 +10,7 @@ function PaymentSuccessContent() {
   const isTrial = searchParams.get('type') === 'trial';
   
   const [countdown, setCountdown] = useState(5);
-  const clinicUrl = process.env.NEXT_PUBLIC_CLINIC_APP_URL || 'https://datagris-clinic.onrender.com';
+  const clinicUrl = process.env.NEXT_PUBLIC_CLINIC_APP_URL || 'https://clinic.datagris.com';
 
   useEffect(() => {
     const timer = setInterval(() => {
