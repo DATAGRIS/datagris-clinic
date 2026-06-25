@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
       console.error('Failed to write to audit_logs:', dbErr.message);
     }
 
-    // 2. Dispatch Email notification to datagris.clinic@gmail.com
+    // 2. Dispatch Email notification to datagric.clinic@gmail.com
     const emailUser = process.env.EMAIL_USER || '';
     const emailPass = process.env.EMAIL_PASS || '';
     
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
         const mailOptions = {
           from: emailUser,
-          to: 'datagris.clinic@gmail.com',
+          to: 'datagric.clinic@gmail.com',
           subject: `🔔 طلب تفعيل واتساب للعميل - ${clinicName}`,
           html: `
             <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eaeaea; border-radius: 5px;">
@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
         emailInfo = `Mail error: ${mailErr.message}`;
       }
     } else {
-      console.log('--- SIMULATED EMAIL TO datagris.clinic@gmail.com ---');
+      console.log('--- SIMULATED EMAIL TO datagric.clinic@gmail.com ---');
       console.log(`Subject: 🔔 طلب تفعيل واتساب للعميل - ${clinicName}`);
       console.log(logDetails);
       console.log('----------------------------------------------------');

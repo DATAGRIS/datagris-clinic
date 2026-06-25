@@ -3,7 +3,7 @@ import axios from 'axios';
 
 const paymobApiKey = process.env.PAYMOB_API_KEY || '';
 const paymobIntegrationId = process.env.PAYMOB_INTEGRATION_ID || '';
-const paymobIframeId = process.env.PAYMOB_IFRAME_ID || '';
+const paymobPublicKey = process.env.PAYMOB_PUBLIC_KEY || process.env.NEXT_PUBLIC_PAYMOB_PUBLIC_KEY || '';
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,61 +13,57 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing checkout parameters' }, { status: 400 });
     }
 
+    if (!paymobPublicKey) {
+      console.error('PAYMOB_PUBLIC_KEY is not configured in environment variables');
+      return NextResponse.json({ error: 'مفتاح Paymob Public Key غير مهيأ في الخادم' }, { status: 500 });
+    }
+
     // Determine pricing plan (Basic: 3000 EGP, Pro: 5000 EGP)
     let amountCents = 300000; // Default Basic: 3,000.00 EGP
     if (plan === 'pro') {
       amountCents = 500000; // Pro: 5,000.00 EGP
     }
 
-    // 1. Authenticate with Paymob to get auth_token
-    const authRes = await axios.post('https://accept.paymob.com/api/auth/tokens', {
-      api_key: paymobApiKey
-    });
-    const authToken = authRes.data.token;
-
-    // 2. Register Order
     const merchantOrderId = `${clinicId}_${plan}_${Date.now()}`;
-    const orderRes = await axios.post('https://accept.paymob.com/api/ecommerce/orders', {
-      auth_token: authToken,
-      delivery_needed: 'false',
-      amount_cents: amountCents,
-      currency: 'EGP',
-      merchant_order_id: merchantOrderId,
-      items: []
-    });
-    const orderId = orderRes.data.id;
 
-    // 3. Generate Payment Key
-    const keyRes = await axios.post('https://accept.paymob.com/api/acceptance/payment_keys', {
-      auth_token: authToken,
-      amount_cents: amountCents,
-      expiration: 3600,
-      order_id: orderId,
-      billing_data: {
-        apartment: 'NA',
-        email: email,
-        floor: 'NA',
-        first_name: 'Clinic',
-        street: 'NA',
-        building: 'NA',
-        phone_number: mobile,
-        shipping_method: 'NA',
-        postal_code: 'NA',
-        city: 'Cairo',
-        country: 'EG',
-        last_name: clinicId,
-        state: 'Cairo'
+    // 1. Create Payment Intention via Paymob v1 API
+    const intentionRes = await axios.post(
+      'https://accept.paymob.com/v1/intention/',
+      {
+        amount: amountCents,
+        currency: 'EGP',
+        payment_methods: [parseInt(paymobIntegrationId)],
+        merchant_order_id: merchantOrderId,
+        billing_data: {
+          apartment: 'NA',
+          email: email,
+          floor: 'NA',
+          first_name: 'Clinic',
+          street: 'NA',
+          building: 'NA',
+          phone_number: mobile,
+          shipping_method: 'NA',
+          postal_code: 'NA',
+          city: 'Cairo',
+          country: 'EG',
+          last_name: clinicId,
+          state: 'Cairo'
+        }
       },
-      currency: 'EGP',
-      integration_id: parseInt(paymobIntegrationId),
-      lock_order_to_token: true
-    });
-    const paymentToken = keyRes.data.token;
+      {
+        headers: {
+          'Authorization': `Token ${paymobApiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
-    // 4. Return Paymob Iframe redirect URL
-    const iframeUrl = `https://accept.paymob.com/api/acceptance/iframes/${paymobIframeId}?payment_token=${paymentToken}`;
+    const clientSecret = intentionRes.data.client_secret;
+
+    // 2. Return Paymob Unified Checkout redirect URL
+    const checkoutUrl = `https://accept.paymob.com/unifiedcheckout/?publicKey=${paymobPublicKey}&clientSecret=${clientSecret}`;
     
-    return NextResponse.json({ url: iframeUrl });
+    return NextResponse.json({ url: checkoutUrl });
   } catch (err: any) {
     const paymobError = err.response?.data ? JSON.stringify(err.response.data) : err.message;
     console.error('Paymob checkout initiation error:', paymobError);
@@ -76,3 +72,4 @@ export async function POST(req: NextRequest) {
     }, { status: 500 });
   }
 }
+

@@ -1,11 +1,25 @@
 const path = require('path');
 const fs = require('fs');
 const initSqlJs = require('sql.js');
+const { AsyncLocalStorage } = require('async_hooks');
+
+const asyncLocalStorage = new AsyncLocalStorage();
 
 let sqliteDb = null;
 let mysqlPool = null;
+let pgPool = null;
 let dbType = 'sqlite';
 let dbPath = '';
+let clinicUserId = null;
+
+function runWithUser(userId, callback) {
+  asyncLocalStorage.run({ userId }, callback);
+}
+
+function getRequestUserId() {
+  const store = asyncLocalStorage.getStore();
+  return store ? store.userId : null;
+}
 
 async function initDatabase() {
   dbType = process.env.DB_TYPE || 'sqlite';
@@ -42,6 +56,46 @@ async function initDatabase() {
     }
     
     runMigrationsSQLite();
+  } else if (dbType === 'postgres' || dbType === 'postgresql') {
+    const { Pool } = require('pg');
+    mysqlPool = null;
+    sqliteDb = null;
+
+    pgPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: {
+        rejectUnauthorized: false
+      }
+    });
+
+    console.log('PostgreSQL Pool initialized');
+
+    // Test connection and run setup
+    const client = await pgPool.connect();
+    try {
+      const clinicId = process.env.CLINIC_ID;
+      if (clinicId) {
+        console.log(`Resolving clinicUserId for clinic: ${clinicId}`);
+        const res = await client.query(
+          `SELECT id FROM profiles WHERE clinic_id = $1 AND role = 'admin' LIMIT 1`,
+          [clinicId]
+        );
+        if (res.rows && res.rows[0]) {
+          clinicUserId = res.rows[0].id;
+          console.log(`Resolved clinicUserId: ${clinicUserId}`);
+        } else {
+          console.warn(`Warning: Admin profile not found for clinic ${clinicId}`);
+        }
+      } else {
+        console.warn('Warning: CLINIC_ID env variable is not set!');
+      }
+
+      await configurePostgresDefaults(client);
+    } catch (e) {
+      console.error('Error during PostgreSQL database init hooks:', e);
+    } finally {
+      client.release();
+    }
   } else {
     const mysql = require('mysql2/promise');
     mysqlPool = mysql.createPool({
@@ -58,7 +112,29 @@ async function initDatabase() {
   }
 
   // Pre-populate missing file numbers for existing patients
-  await populatePatientFiles();
+  if (dbType === 'sqlite' || dbType === 'mysql') {
+    await populatePatientFiles();
+  }
+}
+
+async function configurePostgresDefaults(client) {
+  const tables = [
+    'profiles', 'subscriptions', 'settings', 'patients', 'companions', 
+    'medical_services', 'visits', 'visit_services', 'employees', 'inventory_items', 
+    'maintenance_records', 'vouchers', 'audit_logs', 'examination_templates', 
+    'refunds', 'external_partners', 'referrals', 'chat_messages', 
+    'inventory_transactions', 'visit_inventory_items', 'treasury_sessions', 
+    'treasury_transactions', 'treasury_expenses', 'whatsapp_logs', 
+    'notifications', 'reports'
+  ];
+  console.log('Configuring PostgreSQL defaults for clinic_id column...');
+  for (const table of tables) {
+    try {
+      await client.query(`ALTER TABLE "${table}" ALTER COLUMN clinic_id SET DEFAULT get_user_clinic_id()`);
+    } catch (e) {
+      console.warn(`Failed to alter table ${table} defaults: ${e.message}`);
+    }
+  }
 }
 
 // Helper: Parse SQLite date (UTC representation) safely into Local JS Date
@@ -127,6 +203,34 @@ function sanitizeParams(params) {
   return params.map(p => p === undefined ? null : p);
 }
 
+// Translation helper: Converts SQLite/MySQL SQL parameters and syntax to Postgres
+function translateSqlToPostgres(sql) {
+  let translated = sql;
+
+  // Replace backticks with double quotes
+  translated = translated.replace(/`/g, '"');
+
+  // Replace SQLite INSERT OR IGNORE / INSERT OR REPLACE
+  translated = translated.replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO');
+  if (sql.includes('INSERT OR IGNORE INTO')) {
+    if (!translated.toLowerCase().includes('on conflict')) {
+      if (translated.includes('visit_services')) {
+        translated += ' ON CONFLICT (visit_id, service_id) DO NOTHING';
+      } else if (translated.includes('settings')) {
+        translated += ' ON CONFLICT (clinic_id, key) DO NOTHING';
+      } else {
+        translated += ' ON CONFLICT DO NOTHING';
+      }
+    }
+  }
+
+  // Replace SQLite/MySQL '?' placeholder with Postgres '$1, $2'
+  let index = 1;
+  translated = translated.replace(/\?/g, () => `$${index++}`);
+
+  return translated;
+}
+
 // Unified Query APIs
 async function queryAll(sql, params = []) {
   const cleanParams = sanitizeParams(params);
@@ -143,6 +247,26 @@ async function queryAll(sql, params = []) {
     } catch (err) {
       console.error('SQLite queryAll Error:', err, 'SQL:', sql, 'Params:', cleanParams);
       throw err;
+    }
+  } else if (dbType === 'postgres' || dbType === 'postgresql') {
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const activeUserId = getRequestUserId() || clinicUserId;
+      if (activeUserId) {
+        await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
+        await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+      }
+      const pgSql = translateSqlToPostgres(sql);
+      const result = await client.query(pgSql, cleanParams);
+      await client.query('COMMIT');
+      return result.rows;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Postgres queryAll Error:', err, 'SQL:', sql, 'Params:', cleanParams);
+      throw err;
+    } finally {
+      client.release();
     }
   } else {
     const [rows] = await mysqlPool.execute(sql, cleanParams);
@@ -165,6 +289,26 @@ async function queryOne(sql, params = []) {
     } catch (err) {
       console.error('SQLite queryOne Error:', err, 'SQL:', sql, 'Params:', cleanParams);
       throw err;
+    }
+  } else if (dbType === 'postgres' || dbType === 'postgresql') {
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const activeUserId = getRequestUserId() || clinicUserId;
+      if (activeUserId) {
+        await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
+        await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+      }
+      const pgSql = translateSqlToPostgres(sql);
+      const result = await client.query(pgSql, cleanParams);
+      await client.query('COMMIT');
+      return result.rows[0] || null;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Postgres queryOne Error:', err, 'SQL:', sql, 'Params:', cleanParams);
+      throw err;
+    } finally {
+      client.release();
     }
   } else {
     const [rows] = await mysqlPool.execute(sql, cleanParams);
@@ -192,6 +336,35 @@ async function runCommand(sql, params = []) {
     } catch (err) {
       console.error('SQLite runCommand Error:', err, 'SQL:', sql, 'Params:', cleanParams);
       throw err;
+    }
+  } else if (dbType === 'postgres' || dbType === 'postgresql') {
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const activeUserId = getRequestUserId() || clinicUserId;
+      if (activeUserId) {
+        await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
+        await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+      }
+      const pgSql = translateSqlToPostgres(sql);
+      let finalSql = pgSql;
+      if (pgSql.trim().toUpperCase().startsWith('INSERT INTO')) {
+        if (!pgSql.toUpperCase().includes('RETURNING')) {
+          finalSql = pgSql.trim().replace(/;?$/, ' RETURNING id');
+        }
+      }
+      const result = await client.query(finalSql, cleanParams);
+      await client.query('COMMIT');
+      return {
+        changes: result.rowCount || 0,
+        insertId: result.rows[0]?.id || null
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Postgres runCommand Error:', err, 'SQL:', sql, 'Params:', cleanParams);
+      throw err;
+    } finally {
+      client.release();
     }
   } else {
     const [result] = await mysqlPool.execute(sql, cleanParams);
@@ -1046,5 +1219,6 @@ module.exports = {
   runCommand,
   logAudit,
   getDbType: () => dbType,
-  getDbPath: () => dbPath
+  getDbPath: () => dbPath,
+  runWithUser
 };

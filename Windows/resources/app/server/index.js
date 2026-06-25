@@ -13,6 +13,18 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Parse request userId from cookies and propagate context for PostgreSQL row-level security (RLS)
+app.use((req, res, next) => {
+  let userId = null;
+  if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/userId=([^;]+)/);
+    if (match) {
+      userId = match[1];
+    }
+  }
+  db.runWithUser(userId, next);
+});
+
 // Serve static files from React dist directory
 const distPath = path.join(__dirname, '../dist');
 if (fs.existsSync(distPath)) {
@@ -738,6 +750,73 @@ app.post('/api/setup/wizard', async (req, res) => {
 // 2. Authentication
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
+  const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+
+  if (isPostgres) {
+    const supabaseUrl = process.env.SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return res.status(500).json({ error: 'Supabase configurations (SUPABASE_URL and SUPABASE_ANON_KEY) are missing on the server.' });
+    }
+
+    const email = `${username.trim().toLowerCase()}@datagris-auth.com`;
+    try {
+      const authResponse = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email, password })
+      });
+
+      if (!authResponse.ok) {
+        const errorData = await authResponse.json();
+        console.error('Supabase authentication failed:', errorData);
+        return res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+      }
+
+      const authData = await authResponse.json();
+      const userId = authData.user.id;
+
+      // Fetch user profile from PostgreSQL (run with user context to bypass empty session RLS filter)
+      const profile = await db.runWithUser(userId, () =>
+        db.queryOne('SELECT * FROM profiles WHERE id = ?', [userId])
+      );
+      
+      if (!profile) {
+        return res.status(404).json({ error: 'لم يتم العثور على ملف تعريف المستخدم الخاص بك' });
+      }
+
+      await db.runWithUser(profile.id, () =>
+        db.logAudit(profile.id, profile.username, 'USER_LOGIN', `User logged in as ${profile.role}`)
+      );
+
+      // Attach secure authentication cookies to response
+      res.setHeader('Set-Cookie', [
+        `userId=${profile.id}; Path=/; HttpOnly; SameSite=Lax; Secure`,
+        `clinicId=${profile.clinic_id}; Path=/; SameSite=Lax; Secure`
+      ]);
+
+      return res.json({
+        success: true,
+        user: {
+          id: profile.id,
+          username: profile.username,
+          role: profile.role,
+          fullName: profile.full_name,
+          clinicId: profile.clinic_id
+        },
+        jwt: authData.access_token
+      });
+    } catch (err) {
+      console.error('Postgres Login Error:', err);
+      return res.status(500).json({ error: 'حدث خطأ في الخادم أثناء تسجيل الدخول' });
+    }
+  }
+
+  // Fallback to local SQLite/MySQL database
   try {
     const user = await db.queryOne('SELECT * FROM users WHERE username = ?', [username]);
     if (!user) {
@@ -764,6 +843,16 @@ app.post('/api/auth/login', async (req, res) => {
 
 // 2b. User Accounts Management (Admin Actions)
 app.get('/api/users', async (req, res) => {
+  const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+  if (isPostgres) {
+    try {
+      const rows = await db.queryAll('SELECT id, username, role, full_name, created_at FROM profiles ORDER BY created_at ASC');
+      return res.json(rows);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   try {
     const rows = await db.queryAll('SELECT id, username, role, full_name, created_at FROM users ORDER BY id ASC');
     res.json(rows);
@@ -774,6 +863,60 @@ app.get('/api/users', async (req, res) => {
 
 app.post('/api/users', async (req, res) => {
   const { username, password, role, fullName } = req.body;
+  const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+
+  if (isPostgres) {
+    const supabaseUrl = process.env.SUPABASE_URL || '';
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    const clinicId = process.env.CLINIC_ID || '';
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return res.status(500).json({ error: 'Supabase configuration or Service Role key is missing on the server.' });
+    }
+
+    try {
+      const existing = await db.queryOne('SELECT * FROM profiles WHERE username = ?', [username.trim().toLowerCase()]);
+      if (existing) {
+        return res.status(400).json({ error: 'اسم المستخدم مسجل مسبقاً' });
+      }
+
+      const email = `${username.trim().toLowerCase()}@datagris-auth.com`;
+      const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+        method: 'POST',
+        headers: {
+          'apikey': supabaseServiceKey,
+          'Authorization': `Bearer ${supabaseServiceKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: { clinic_id: clinicId }
+        })
+      });
+
+      if (!authRes.ok) {
+        const errorData = await authRes.json();
+        console.error('Supabase admin user creation failed:', errorData);
+        return res.status(400).json({ error: errorData.message || 'فشل إنشاء حساب المستخدم في النظام السحابي' });
+      }
+
+      const authData = await authRes.json();
+      const userId = authData.id;
+
+      await db.runCommand(
+        'INSERT INTO profiles (id, clinic_id, username, full_name, role) VALUES (?, ?, ?, ?, ?)',
+        [userId, clinicId, username.trim().toLowerCase(), fullName, role]
+      );
+
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('Postgres user creation error:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   try {
     const existing = await db.queryOne('SELECT * FROM users WHERE username = ?', [username]);
     if (existing) {
@@ -792,6 +935,49 @@ app.post('/api/users', async (req, res) => {
 
 app.put('/api/users/:id', async (req, res) => {
   const { username, password, role, fullName } = req.body;
+  const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+
+  if (isPostgres) {
+    const supabaseUrl = process.env.SUPABASE_URL || '';
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return res.status(500).json({ error: 'Supabase configuration or Service Role key is missing on the server.' });
+    }
+
+    try {
+      const userId = req.params.id;
+
+      if (password) {
+        const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users/${userId}`, {
+          method: 'PUT',
+          headers: {
+            'apikey': supabaseServiceKey,
+            'Authorization': `Bearer ${supabaseServiceKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ password })
+        });
+
+        if (!authRes.ok) {
+          const errorData = await authRes.json();
+          console.error('Supabase admin update password failed:', errorData);
+          return res.status(400).json({ error: errorData.message || 'فشل تحديث كلمة المرور في النظام السحابي' });
+        }
+      }
+
+      await db.runCommand(
+        'UPDATE profiles SET username = ?, role = ?, full_name = ? WHERE id = ?',
+        [username.trim().toLowerCase(), role, fullName, userId]
+      );
+
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('Postgres user update error:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   try {
     const hash = password ? hashPassword(password) : null;
     if (hash) {
@@ -812,6 +998,50 @@ app.put('/api/users/:id', async (req, res) => {
 });
 
 app.delete('/api/users/:id', async (req, res) => {
+  const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+
+  if (isPostgres) {
+    const supabaseUrl = process.env.SUPABASE_URL || '';
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return res.status(500).json({ error: 'Supabase configuration or Service Role key is missing on the server.' });
+    }
+
+    try {
+      const userId = req.params.id;
+
+      const profile = await db.queryOne('SELECT role FROM profiles WHERE id = ?', [userId]);
+      if (profile && profile.role === 'admin') {
+        const clinicId = process.env.CLINIC_ID;
+        const otherAdmins = await db.queryAll("SELECT id FROM profiles WHERE clinic_id = ? AND role = 'admin' AND id != ?", [clinicId, userId]);
+        if (otherAdmins.length === 0) {
+          return res.status(400).json({ error: 'لا يمكن حذف مدير النظام الوحيد للعيادة' });
+        }
+      }
+
+      const authRes = await fetch(`${supabaseUrl}/auth/v1/admin/users/${userId}`, {
+        method: 'DELETE',
+        headers: {
+          'apikey': supabaseServiceKey,
+          'Authorization': `Bearer ${supabaseServiceKey}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!authRes.ok) {
+        const errorData = await authRes.json();
+        console.error('Supabase admin delete user failed:', errorData);
+        return res.status(400).json({ error: errorData.message || 'فشل حذف حساب المستخدم من النظام السحابي' });
+      }
+
+      return res.json({ success: true });
+    } catch (err) {
+      console.error('Postgres user deletion error:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   try {
     if (parseInt(req.params.id) === 1) {
       return res.status(400).json({ error: 'لا يمكن حذف حساب مدير النظام الافتراضي' });

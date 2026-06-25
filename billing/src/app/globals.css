@@ -1,19 +1,30 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Cairo:wght@300;400;500;600;700;800&display=swap');
 
 :root {
-  --bg-dark: #0f172a;
-  --bg-card: rgba(30, 41, 59, 0.7);
-  --border-color: rgba(255, 255, 255, 0.08);
-  --primary: #6366f1;
-  --primary-hover: #4f46e5;
-  --accent-green: #10b981;
+  --bg-app: #f1f5f9;
+  --bg-card: #ffffff;
+  --border-color: #e2e8f0;
+  --primary: #2f5daa;
+  --primary-hover: #224888;
+  --accent: #0ea5e9;
+  --accent-green: #22c55e;
   --accent-red: #ef4444;
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
   --font-en: 'Inter', system-ui, -apple-system, sans-serif;
   --font-ar: 'Cairo', system-ui, -apple-system, sans-serif;
   --radius-lg: 16px;
-  --radius-md: 8px;
+  --radius-md: 12px;
+}
+
+.dark {
+  --bg-app: #090d16;
+  --bg-card: #131926;
+  --border-color: #1e293b;
+  --primary: #0ea5e9;
+  --primary-hover: #38bdf8;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
 }
 
 * {
@@ -23,15 +34,13 @@
 }
 
 body {
-  background-color: var(--bg-dark);
-  background-image: 
-    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.07) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.05) 0px, transparent 50%);
+  background-color: var(--bg-app);
   color: var(--text-main);
   font-family: var(--font-en);
   min-height: 100vh;
   line-height: 1.5;
   overflow-x: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Navigation Layout */
@@ -39,13 +48,22 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 80px;
+  padding: 16px 80px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px);
+  background: var(--bg-card);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
   position: sticky;
   top: 0;
   z-index: 100;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+@media (max-width: 768px) {
+  .navbar {
+    padding: 16px 20px;
+    flex-direction: column;
+    gap: 16px;
+  }
 }
 
 .nav-logo {
@@ -59,8 +77,21 @@ body {
 }
 
 .nav-logo img {
-  height: 40px;
+  height: 48px;
   object-fit: contain;
+}
+
+.logo-badge {
+  font-size: 0.75rem;
+  background: rgba(47, 93, 170, 0.1);
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+.dark .logo-badge {
+  background: rgba(14, 165, 233, 0.15);
+  color: var(--primary);
 }
 
 .nav-links {
@@ -72,13 +103,38 @@ body {
 .nav-link {
   color: var(--text-muted);
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 600;
   transition: color 0.3s ease;
   font-size: 0.95rem;
+  font-family: var(--font-ar);
 }
 
 .nav-link:hover {
   color: var(--text-main);
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.action-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-ar);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.action-btn:hover {
+  background: var(--border-color);
+  transform: translateY(-1px);
 }
 
 .nav-btn {
@@ -89,30 +145,30 @@ body {
   font-weight: 600;
   text-decoration: none;
   transition: all 0.3s ease;
+  font-size: 0.9rem;
+  font-family: var(--font-ar);
 }
 
 .nav-btn:hover {
   background: var(--primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 12px rgba(47, 93, 170, 0.3);
 }
 
 /* Hero Section */
 .hero {
   text-align: center;
-  padding: 80px 20px;
+  padding: 60px 20px;
   max-width: 800px;
   margin: 0 auto;
 }
 
 .hero h1 {
-  font-size: 3.5rem;
+  font-size: 3rem;
   font-weight: 800;
   line-height: 1.2;
   margin-bottom: 24px;
-  background: linear-gradient(135deg, #ffffff, #94a3b8);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--text-main);
   letter-spacing: -1px;
 }
 
@@ -125,7 +181,7 @@ body {
 
 /* Pricing Section */
 .pricing-section {
-  padding: 40px 20px 100px;
+  padding: 20px 20px 80px;
   max-width: 1200px;
   margin: 0 auto;
 }
@@ -134,7 +190,7 @@ body {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 30px;
-  margin-top: 48px;
+  margin-top: 20px;
   align-items: stretch;
 }
 
@@ -142,13 +198,12 @@ body {
   .pricing-grid {
     grid-template-columns: 1fr;
     max-width: 500px;
-    margin: 48px auto 0;
+    margin: 30px auto 0;
   }
 }
 
 .pricing-card {
   background: var(--bg-card);
-  backdrop-filter: blur(8px);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   padding: 40px 32px;
@@ -156,17 +211,18 @@ body {
   flex-direction: column;
   position: relative;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
 }
 
 .pricing-card:hover {
   transform: translateY(-8px);
-  border-color: rgba(99, 102, 241, 0.4);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 0 0 30px rgba(99, 102, 241, 0.05);
+  border-color: var(--primary);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1), 0 0 30px rgba(47, 93, 170, 0.15);
 }
 
 .pricing-card.popular {
   border-color: var(--primary);
-  box-shadow: 0 10px 30px rgba(99, 102, 241, 0.1);
+  box-shadow: 0 10px 30px rgba(47, 93, 170, 0.15);
 }
 
 .pricing-card.popular::before {
@@ -197,6 +253,7 @@ body {
   margin: 16px 0;
   display: flex;
   align-items: baseline;
+  color: var(--primary);
   gap: 4px;
 }
 
@@ -315,7 +372,7 @@ body {
   padding: 12px 16px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
-  background: rgba(15, 23, 42, 0.5);
+  background: var(--bg-app);
   color: var(--text-main);
   font-family: inherit;
   font-size: 1rem;
@@ -325,7 +382,7 @@ body {
 .form-control:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 0 2px rgba(47, 93, 170, 0.2);
 }
 
 .form-submit {
@@ -436,11 +493,11 @@ body {
 .showcase-item {
   display: flex;
   gap: 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   padding: 20px;
   border-radius: var(--radius-lg);
-  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
 }
 
 .showcase-item .icon-wrapper {
@@ -462,7 +519,7 @@ body {
 
 .checkout-form-panel {
   width: 50%;
-  background: var(--bg-dark);
+  background: var(--bg-app);
   display: flex;
   align-items: center;
   justify-content: center;
