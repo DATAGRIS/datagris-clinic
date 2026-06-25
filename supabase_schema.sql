@@ -460,3 +460,28 @@ CREATE POLICY reports_clinic_isolation ON reports FOR ALL USING (clinic_id = get
 CREATE POLICY profiles_insert_policy ON profiles FOR INSERT WITH CHECK (true);
 CREATE POLICY clinics_insert_policy ON clinics FOR INSERT WITH CHECK (true);
 CREATE POLICY subscriptions_insert_policy ON subscriptions FOR INSERT WITH CHECK (true);
+
+-- ====================================================
+-- TRIGGERS FOR CASCADE DELETION ACROSS TENANTS
+-- ====================================================
+
+-- Trigger function to delete the clinic and all its cascade-linked data when the owner's profile is deleted
+CREATE OR REPLACE FUNCTION delete_clinic_on_owner_profile_delete()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Check if the deleted profile was the owner of a subscription
+    IF EXISTS (SELECT 1 FROM subscriptions WHERE owner_user_id = OLD.id) THEN
+        -- Only delete the clinic if it still exists
+        IF EXISTS (SELECT 1 FROM clinics WHERE id = OLD.clinic_id) THEN
+            DELETE FROM clinics WHERE id = OLD.clinic_id;
+        END IF;
+    END IF;
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger to execute the function AFTER DELETE on profiles
+CREATE OR REPLACE TRIGGER trigger_delete_clinic_on_owner_profile_delete
+AFTER DELETE ON profiles
+FOR EACH ROW
+EXECUTE FUNCTION delete_clinic_on_owner_profile_delete();
