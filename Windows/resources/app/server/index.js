@@ -214,14 +214,7 @@ async function sendFollowUpReminders() {
   }
 }
 
-// Run follow-up reminder check once on startup after 10s, then every 24 hours
-setTimeout(() => {
-  sendFollowUpReminders();
-}, 10000);
 
-setInterval(() => {
-  sendFollowUpReminders();
-}, 24 * 60 * 60 * 1000);
 
 
 // --- MIDDLEWARES ---
@@ -3154,6 +3147,15 @@ async function startServer() {
     runAutoBackupIfDue();
   }, 30 * 60 * 1000);
 
+  // Run follow-up reminder check once on startup after 10s, then every 24 hours
+  setTimeout(() => {
+    sendFollowUpReminders();
+  }, 10000);
+
+  setInterval(() => {
+    sendFollowUpReminders();
+  }, 24 * 60 * 60 * 1000);
+
   const port = process.env.PORT || 5000;
   return new Promise((resolve, reject) => {
     const onError = (err) => {
@@ -3167,6 +3169,13 @@ async function startServer() {
       console.log(`Embedded server running on http://localhost:${port}`);
       resolve(serverListener);
     });
+  });
+}
+
+if (require.main === module) {
+  startServer().catch(err => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
   });
 }
 

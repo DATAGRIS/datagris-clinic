@@ -69,7 +69,10 @@ export async function POST(req: NextRequest) {
     
     return NextResponse.json({ url: iframeUrl });
   } catch (err: any) {
-    console.error('Paymob checkout initiation error:', err.response?.data || err.message);
-    return NextResponse.json({ error: 'حدث خطأ أثناء الاتصال ببوابة الدفع Paymob' }, { status: 500 });
+    const paymobError = err.response?.data ? JSON.stringify(err.response.data) : err.message;
+    console.error('Paymob checkout initiation error:', paymobError);
+    return NextResponse.json({ 
+      error: `حدث خطأ أثناء الاتصال ببوابة الدفع Paymob: ${paymobError}` 
+    }, { status: 500 });
   }
 }

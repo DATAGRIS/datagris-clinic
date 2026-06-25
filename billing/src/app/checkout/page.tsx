@@ -245,7 +245,7 @@ function CheckoutContent() {
                     setWaRequested(false);
                     setError('');
                   }}
-                  disabled={loading}
+                  disabled={loading || !!searchParams.get('plan')}
                 >
                   {!existingClinicId && <option value="trial">باقة تجريبية - 7 أيام مجاناً / 7-Day Free Trial (0 EGP)</option>}
                   <option value="basic">الباقة الأساسية - سنوي (3000 EGP) / Basic Annual</option>
