@@ -58,128 +58,200 @@ export default function ClientLayoutWrapper({ children }: ClientLayoutWrapperPro
         </nav>
 
         <div className="nav-actions">
-          {/* Minimal Settings Icon Button */}
-          <button 
-            onClick={() => setShowSettings(true)} 
-            className="action-btn settings-btn" 
-            title={t.settings}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px' }}
-          >
-            <svg 
-              width="18" 
-              height="18" 
-              viewBox="0 0 24 24" 
-              fill="none" 
-              stroke="currentColor" 
-              strokeWidth="2" 
-              strokeLinecap="round" 
-              strokeLinejoin="round"
+          {/* Settings button and dropdown wrapper */}
+          <div style={{ position: 'relative' }}>
+            <button 
+              onClick={() => setShowSettings(!showSettings)} 
+              className="action-btn settings-btn" 
+              title={t.settings}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px' }}
             >
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-          </button>
+              <svg 
+                width="18" 
+                height="18" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </button>
+
+            {/* Transparent click catcher to close dropdown when clicking outside */}
+            {showSettings && (
+              <div 
+                onClick={() => setShowSettings(false)}
+                style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  zIndex: 199,
+                  background: 'transparent'
+                }}
+              />
+            )}
+
+            {/* Settings Dropdown Popover */}
+            {showSettings && (
+              <div 
+                className="settings-dropdown" 
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: lang === 'en' ? 0 : 'auto',
+                  left: lang === 'ar' ? 0 : 'auto',
+                  marginTop: '8px',
+                  width: '260px',
+                  backgroundColor: 'var(--bg-card)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--radius-md)',
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                  padding: '16px',
+                  zIndex: 200,
+                  textAlign: lang === 'ar' ? 'right' : 'left'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-main)', fontFamily: 'var(--font-ar)' }}>
+                    {t.settings}
+                  </span>
+                  <button 
+                    onClick={() => setShowSettings(false)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      fontSize: '1rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '4px'
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Language Selector (Side by side) */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ fontWeight: 600, fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px', display: 'block', fontFamily: 'var(--font-ar)' }}>
+                    {t.language}
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      onClick={() => setLang('ar')}
+                      style={{
+                        flex: 1,
+                        padding: '8px 10px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        border: lang === 'ar' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                        backgroundColor: lang === 'ar' ? 'var(--primary)' : 'transparent',
+                        color: lang === 'ar' ? '#ffffff' : 'var(--text-main)',
+                        fontFamily: 'var(--font-ar)'
+                      }}
+                    >
+                      العربية
+                    </button>
+                    <button 
+                      onClick={() => setLang('en')}
+                      style={{
+                        flex: 1,
+                        padding: '8px 10px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        border: lang === 'en' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                        backgroundColor: lang === 'en' ? 'var(--primary)' : 'transparent',
+                        color: lang === 'en' ? '#ffffff' : 'var(--text-main)',
+                        fontFamily: 'var(--font-en)'
+                      }}
+                    >
+                      English
+                    </button>
+                  </div>
+                </div>
+
+                {/* Theme Selector (Side by side with monochrome icons) */}
+                <div>
+                  <label style={{ fontWeight: 600, fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px', display: 'block', fontFamily: 'var(--font-ar)' }}>
+                    {t.appearance}
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      onClick={() => setTheme('light')}
+                      style={{
+                        flex: 1,
+                        padding: '8px 10px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        border: theme === 'light' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                        backgroundColor: theme === 'light' ? 'var(--primary)' : 'transparent',
+                        color: theme === 'light' ? '#ffffff' : 'var(--text-main)',
+                        fontFamily: 'var(--font-ar)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="4"></circle>
+                        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                      </svg>
+                      <span>{t.lightMode}</span>
+                    </button>
+                    <button 
+                      onClick={() => setTheme('dark')}
+                      style={{
+                        flex: 1,
+                        padding: '8px 10px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        border: theme === 'dark' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                        backgroundColor: theme === 'dark' ? 'var(--primary)' : 'transparent',
+                        color: theme === 'dark' ? '#ffffff' : 'var(--text-main)',
+                        fontFamily: 'var(--font-ar)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+                      </svg>
+                      <span>{t.darkMode}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
           
           <Link href="/checkout?plan=trial" className="nav-btn">
             {t.startTrial}
           </Link>
         </div>
       </header>
-
-      {/* Settings Modal Dialog */}
-      {showSettings && (
-        <div className="custom-modal-overlay" style={{ backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }}>
-          <div className="custom-modal-card" style={{ maxWidth: '340px', padding: '24px', position: 'relative' }}>
-            {/* Close Button X */}
-            <button 
-              onClick={() => setShowSettings(false)}
-              style={{
-                position: 'absolute',
-                top: '16px',
-                right: lang === 'en' ? '16px' : 'auto',
-                left: lang === 'ar' ? '16px' : 'auto',
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-muted)',
-                fontSize: '1.2rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              ✕
-            </button>
-
-            <h3 style={{ fontSize: '1.2rem', color: 'var(--text-main)', marginBottom: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px', fontFamily: 'var(--font-ar)', textAlign: 'start' }}>
-              {t.settings}
-            </h3>
-
-            {/* Language Selector */}
-            <div className="form-group" style={{ marginBottom: '18px', textAlign: 'start' }}>
-              <label style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-main)', marginBottom: '8px', display: 'block', fontFamily: 'var(--font-ar)' }}>
-                {t.language}
-              </label>
-              <select 
-                value={lang} 
-                onChange={(e) => setLang(e.target.value as 'ar' | 'en')}
-                className="form-control"
-                style={{
-                  height: '42px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-app)',
-                  color: 'var(--text-main)',
-                  padding: '0 12px',
-                  fontWeight: 600
-                }}
-              >
-                <option value="ar">العربية</option>
-                <option value="en">English</option>
-              </select>
-            </div>
-
-            {/* Theme Selector */}
-            <div className="form-group" style={{ marginBottom: '24px', textAlign: 'start' }}>
-              <label style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-main)', marginBottom: '8px', display: 'block', fontFamily: 'var(--font-ar)' }}>
-                {t.appearance}
-              </label>
-              <select 
-                value={theme} 
-                onChange={(e) => setTheme(e.target.value as 'light' | 'dark')}
-                className="form-control"
-                style={{
-                  height: '42px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-app)',
-                  color: 'var(--text-main)',
-                  padding: '0 12px',
-                  fontWeight: 600
-                }}
-              >
-                <option value="light">{lang === 'ar' ? 'مضيء / Light' : 'Light'}</option>
-                <option value="dark">{lang === 'ar' ? 'داكن / Dark' : 'Dark'}</option>
-              </select>
-            </div>
-
-            <button 
-              onClick={() => setShowSettings(false)}
-              className="form-submit"
-              style={{
-                marginTop: '0',
-                padding: '10px',
-                borderRadius: '8px',
-                fontSize: '0.9rem',
-                backgroundColor: 'var(--primary)',
-                fontFamily: 'var(--font-ar)'
-              }}
-            >
-              {t.close}
-            </button>
-          </div>
-        </div>
-      )}
 
       {children}
     </>
