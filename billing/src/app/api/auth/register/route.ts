@@ -99,7 +99,11 @@ export async function POST(req: NextRequest) {
       enableVitalsGlobal: 'true',
       enableVitalsReception: 'true',
       enableVitalsDoctor: 'true',
-      diagnosisTiming: 'before_and_after'
+      diagnosisTiming: 'before_and_after',
+      subscriptionPlan: plan,
+      subscriptionStatus: status,
+      subscriptionStartDate: now.toISOString(),
+      subscriptionEndDate: trialEnd.toISOString()
     };
 
     for (const [key, value] of Object.entries(defaultSettings)) {

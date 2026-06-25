@@ -1,147 +1,125 @@
-const { Pool } = require('pg');
-const jwt = require('jsonwebtoken');
-const { AsyncLocalStorage } = require('async_hooks');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+const initSqlJs = require('sql.js');
 
-// Request-scoped storage for multi-tenant RLS context tracking
-const asyncLocalStorage = new AsyncLocalStorage();
-
-let pool = null;
-let dbType = 'postgres';
-let dbPath = ''; // Not used for postgres but kept for compatibility
-let currentClinicUserId = null;
-
-// Store the logged-in user's JWT in global memory (original behavior)
-global.userJwt = null;
-
-function getClinicId() {
-  if (process.env.CLINIC_ID) return process.env.CLINIC_ID;
-  try {
-    const dataDir = process.env.USER_DATA_PATH || path.join(__dirname, '..');
-    const configPath = path.join(dataDir, 'clinic_config.json');
-    if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      return config.clinicId;
-    }
-  } catch (e) {
-    console.error('Error reading clinic_config.json:', e);
-  }
-  return 'CLN-000001'; // Default fallback clinic ID
-}
+let sqliteDb = null;
+let mysqlPool = null;
+let dbType = 'sqlite';
+let dbPath = '';
 
 async function initDatabase() {
-  dbType = 'postgres';
-  console.log(`Initializing PostgreSQL database connection pool for Cloud Hosting...`);
+  dbType = process.env.DB_TYPE || 'sqlite';
+  console.log(`Initializing database of type: ${dbType}`);
 
-  let connectionString = process.env.DATABASE_URL;
+  if (dbType === 'sqlite') {
+    // Determine data directory (AppData in packaged Electron, current dir in dev/terminal)
+    const dataDir = process.env.USER_DATA_PATH || __dirname;
+    dbPath = path.join(dataDir, 'clinic.db');
+    console.log(`SQLite Database Path: ${dbPath}`);
+    
+    // Ensure directory exists
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
 
-  // If no environment variable, try loading from billing/.env.local (development local fallback)
-  if (!connectionString) {
-    try {
-      const envPath = path.join(__dirname, '../../../../billing/.env.local');
-      if (fs.existsSync(envPath)) {
-        const envContent = fs.readFileSync(envPath, 'utf8');
-        const dbUrlLine = envContent.split('\n').find(line => line.trim().startsWith('DATABASE_URL='));
-        if (dbUrlLine) {
-          connectionString = dbUrlLine.replace('DATABASE_URL=', '').replace(/"/g, '').trim();
-        }
+    if (sqliteDb) {
+      try {
+        sqliteDb.close();
+      } catch (e) {
+        console.error('Error closing database during re-init:', e);
       }
-    } catch (e) {
-      console.error('Could not load DATABASE_URL from fallback billing env file:', e);
+      sqliteDb = null;
     }
-  }
 
-  // Final fallback if everything else fails
-  if (!connectionString) {
-    connectionString = "postgresql://postgres.whfegxabypqkvnmfwfqj:linic06062026%40@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?pgbouncer=true";
-  }
-
-  pool = new Pool({
-    connectionString,
-    ssl: {
-      rejectUnauthorized: false
-    }
-  });
-
-  // Verify connection and resolve default clinic user context
-  const client = await pool.connect();
-  try {
-    console.log('Successfully connected to Supabase PostgreSQL database.');
-    const clinicId = getClinicId();
-    const res = await client.query('SELECT id FROM profiles WHERE clinic_id = $1 LIMIT 1', [clinicId]);
-    if (res.rows.length > 0) {
-      currentClinicUserId = res.rows[0].id;
-      console.log(`RLS Context: Resolved clinic ID ${clinicId} to default admin user UUID: ${currentClinicUserId}`);
+    const SQL = await initSqlJs();
+    if (fs.existsSync(dbPath)) {
+      console.log('Loading existing SQLite database file...');
+      const filebuffer = fs.readFileSync(dbPath);
+      sqliteDb = new SQL.Database(filebuffer);
     } else {
-      console.warn(`RLS Context WARNING: No profiles found for clinic ${clinicId}`);
+      console.log('Creating a new SQLite database in memory...');
+      sqliteDb = new SQL.Database();
     }
+    
+    runMigrationsSQLite();
+  } else {
+    const mysql = require('mysql2/promise');
+    mysqlPool = mysql.createPool({
+      host: process.env.MYSQL_HOST || 'localhost',
+      port: parseInt(process.env.MYSQL_PORT || '3306'),
+      user: process.env.MYSQL_USER || 'root',
+      password: process.env.MYSQL_PASSWORD || '',
+      database: process.env.MYSQL_DATABASE || 'clinic_db',
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0
+    });
+    await runMigrationsMySQL();
+  }
+
+  // Pre-populate missing file numbers for existing patients
+  await populatePatientFiles();
+}
+
+// Helper: Parse SQLite date (UTC representation) safely into Local JS Date
+function parseDbDate(dateStr) {
+  if (!dateStr) return new Date();
+  if (typeof dateStr === 'object') return dateStr;
+  let s = String(dateStr);
+  if (!s.includes('T') && !s.includes('Z')) {
+    s = s.replace(' ', 'T') + 'Z';
+  }
+  return new Date(s);
+}
+
+// Migration helper: populate sequential file numbers PAT-XXXXXX
+async function populatePatientFiles() {
+  try {
+    const rows = await queryAll("SELECT mobile_number, created_at FROM patients WHERE file_number IS NULL OR file_number = '' ORDER BY created_at ASC");
+    if (rows.length === 0) return;
+
+    console.log(`Populating file numbers for ${rows.length} existing patient(s)...`);
+
+    // Find the current highest patient file number prefix index
+    const maxRow = await queryOne("SELECT file_number FROM patients WHERE file_number LIKE 'PAT-%' ORDER BY file_number DESC LIMIT 1");
+    let currentIdx = 0;
+    if (maxRow && maxRow.file_number) {
+      const match = maxRow.file_number.match(/PAT-(\d+)/);
+      if (match) {
+        currentIdx = parseInt(match[1]);
+      }
+    }
+
+    for (const r of rows) {
+      currentIdx++;
+      const fileNumber = 'PAT-' + String(currentIdx).padStart(6, '0');
+      
+      const dateVal = parseDbDate(r.created_at);
+      const regDate = dateVal.toISOString().split('T')[0];
+      const regTime = dateVal.toTimeString().split(' ')[0];
+
+      await runCommand(
+        "UPDATE patients SET file_number = ?, registration_date = ?, registration_time = ? WHERE mobile_number = ?",
+        [fileNumber, regDate, regTime, r.mobile_number]
+      );
+    }
+    console.log('Patient pre-population migration completed successfully.');
   } catch (err) {
-    console.error('Failed to run init queries on PostgreSQL database:', err);
-    throw err;
-  } finally {
-    client.release();
+    console.error('Failed to pre-populate patient file numbers:', err);
   }
 }
 
-// Translate SQLite queries to PostgreSQL dialect
-function translateSqlToPostgres(sql) {
-  let translated = sql;
-
-  // 1. Replace backticks with double quotes for PostgreSQL identifiers
-  translated = translated.replace(/`/g, '"');
-
-  // 2. Map SQLite table 'users' references to PostgreSQL 'profiles' table
-  translated = translated.replace(/\busers\b/g, 'profiles');
-  translated = translated.replace(/\b"users"\b/g, '"profiles"');
-
-  // 3. Translate SQLite INSERT OR IGNORE / INSERT OR REPLACE
-  translated = translated.replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO');
-  if (sql.includes('INSERT OR IGNORE INTO')) {
-    if (!translated.toLowerCase().includes('on conflict')) {
-      if (translated.includes('visit_services')) {
-        translated += ' ON CONFLICT (visit_id, service_id) DO NOTHING';
-      } else {
-        translated += ' ON CONFLICT DO NOTHING';
-      }
+// Save in-memory SQLite to disk file
+function saveToDisk() {
+  if (dbType === 'sqlite' && sqliteDb && dbPath) {
+    try {
+      const data = sqliteDb.export();
+      const buffer = Buffer.from(data);
+      fs.writeFileSync(dbPath, buffer);
+    } catch (err) {
+      console.error('Failed to save SQLite database to disk:', err);
     }
   }
-
-  if (translated.includes('INSERT OR REPLACE INTO')) {
-    translated = translated.replace(/INSERT OR REPLACE INTO/gi, 'INSERT INTO');
-    if (translated.includes('settings')) {
-      translated += ' ON CONFLICT (clinic_id, key) DO UPDATE SET value = EXCLUDED.value';
-    } else if (translated.includes('patients')) {
-      translated += ' ON CONFLICT (mobile_number) DO UPDATE SET name = EXCLUDED.name, age = EXCLUDED.age, chief_complaint = EXCLUDED.chief_complaint';
-    }
-  }
-
-  // 4. Translate MySQL ON DUPLICATE KEY UPDATE to PG ON CONFLICT
-  if (translated.toLowerCase().includes('on duplicate key update')) {
-    translated = translated.replace(/on duplicate key update[\s\S]+/gi, (match) => {
-      return match
-        .replace(/VALUES\(([^)]+)\)/gi, 'EXCLUDED.$1')
-        .replace(/on duplicate key update/gi, 'ON CONFLICT (mobile_number) DO UPDATE');
-    });
-  }
-
-  // 5. Replace '?' parameter placeholders with positional parameters '$1', '$2', etc.
-  let index = 1;
-  translated = translated.replace(/\?/g, () => `$${index++}`);
-
-  // 6. Append 'RETURNING id' to INSERT statements for tables that use autoincrement serial IDs.
-  // This satisfies the Express routes relying on result.insertId.
-  const trimmed = translated.trim().toUpperCase();
-  if (trimmed.startsWith('INSERT')) {
-    if (!trimmed.includes('RETURNING') && 
-        !trimmed.includes('SETTINGS') && 
-        !trimmed.includes('PATIENTS') && 
-        !trimmed.includes('VISIT_SERVICES')) {
-      translated += ' RETURNING id';
-    }
-  }
-
-  return translated;
 }
 
 function sanitizeParams(params) {
@@ -149,128 +127,915 @@ function sanitizeParams(params) {
   return params.map(p => p === undefined ? null : p);
 }
 
-// Retrieve the active request-scoped or global user UUID to enforce RLS
-function getActiveUserId() {
-  const store = asyncLocalStorage.getStore();
-  if (store && store.userId) {
-    return store.userId;
-  }
-  
-  if (global.userJwt) {
-    try {
-      const decoded = jwt.decode(global.userJwt);
-      if (decoded && decoded.sub) {
-        return decoded.sub;
-      }
-    } catch (e) {
-      console.error('Error decoding global userJwt:', e);
-    }
-  }
-
-  return currentClinicUserId;
-}
-
+// Unified Query APIs
 async function queryAll(sql, params = []) {
   const cleanParams = sanitizeParams(params);
-  const pgSql = translateSqlToPostgres(sql);
-  
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    
-    const userId = getActiveUserId();
-    if (userId) {
-      await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [userId]);
-      await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+  if (dbType === 'sqlite') {
+    try {
+      const stmt = sqliteDb.prepare(sql);
+      stmt.bind(cleanParams);
+      const rows = [];
+      while (stmt.step()) {
+        rows.push(stmt.getAsObject());
+      }
+      stmt.free();
+      return rows;
+    } catch (err) {
+      console.error('SQLite queryAll Error:', err, 'SQL:', sql, 'Params:', cleanParams);
+      throw err;
     }
-
-    const result = await client.query(pgSql, cleanParams);
-    await client.query('COMMIT');
-    return result.rows;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('PostgreSQL queryAll Error:', err, 'SQL:', sql, 'Translated:', pgSql);
-    throw err;
-  } finally {
-    client.release();
+  } else {
+    const [rows] = await mysqlPool.execute(sql, cleanParams);
+    return rows;
   }
 }
 
 async function queryOne(sql, params = []) {
   const cleanParams = sanitizeParams(params);
-  const pgSql = translateSqlToPostgres(sql);
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const userId = getActiveUserId();
-    if (userId) {
-      await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [userId]);
-      await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+  if (dbType === 'sqlite') {
+    try {
+      const stmt = sqliteDb.prepare(sql);
+      stmt.bind(cleanParams);
+      let row = null;
+      if (stmt.step()) {
+        row = stmt.getAsObject();
+      }
+      stmt.free();
+      return row;
+    } catch (err) {
+      console.error('SQLite queryOne Error:', err, 'SQL:', sql, 'Params:', cleanParams);
+      throw err;
     }
-
-    const result = await client.query(pgSql, cleanParams);
-    await client.query('COMMIT');
-    return result.rows[0] || null;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('PostgreSQL queryOne Error:', err, 'SQL:', sql, 'Translated:', pgSql);
-    throw err;
-  } finally {
-    client.release();
+  } else {
+    const [rows] = await mysqlPool.execute(sql, cleanParams);
+    return rows[0] || null;
   }
 }
 
 async function runCommand(sql, params = []) {
   const cleanParams = sanitizeParams(params);
-  const pgSql = translateSqlToPostgres(sql);
+  if (dbType === 'sqlite') {
+    try {
+      sqliteDb.run(sql, cleanParams);
+      saveToDisk(); // Persist changes to disk file immediately
+      
+      // Get last insert row ID
+      const stmt = sqliteDb.prepare('SELECT last_insert_rowid() as id');
+      stmt.step();
+      const insertId = stmt.getAsObject().id;
+      stmt.free();
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const userId = getActiveUserId();
-    if (userId) {
-      await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [userId]);
-      await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+      return {
+        changes: 1,
+        insertId: insertId
+      };
+    } catch (err) {
+      console.error('SQLite runCommand Error:', err, 'SQL:', sql, 'Params:', cleanParams);
+      throw err;
     }
-
-    const result = await client.query(pgSql, cleanParams);
-    await client.query('COMMIT');
-
-    let insertId = null;
-    if (result.rows && result.rows.length > 0 && result.rows[0].id !== undefined) {
-      insertId = result.rows[0].id;
-    }
-
+  } else {
+    const [result] = await mysqlPool.execute(sql, cleanParams);
     return {
-      changes: result.rowCount || 0,
-      insertId: insertId
+      changes: result.affectedRows,
+      insertId: result.insertId
     };
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('PostgreSQL runCommand Error:', err, 'SQL:', sql, 'Translated:', pgSql);
-    throw err;
-  } finally {
-    client.release();
   }
 }
 
+// Log audit trail
 async function logAudit(userId, username, action, details = '') {
   try {
-    let resolvedUserId = userId;
-    // Map simple integer local audit userId like 1 to the actual UUID if possible
-    if (userId === 1 || userId === '1' || !userId) {
-      resolvedUserId = getActiveUserId();
-    }
-    
     await runCommand(
       'INSERT INTO audit_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)',
-      [resolvedUserId, username, action, details]
+      [userId, username, action, details]
     );
   } catch (err) {
-    console.error('Audit log failed in PostgreSQL:', err);
+    console.error('Audit log failed:', err);
+  }
+}
+
+function runMigrationsSQLite() {
+  sqliteDb.run(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE,
+      password_hash TEXT,
+      role TEXT,
+      full_name TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS patients (
+      mobile_number TEXT PRIMARY KEY,
+      name TEXT,
+      gender TEXT,
+      age INTEGER,
+      weight REAL,
+      height REAL,
+      temperature REAL,
+      chief_complaint TEXT,
+      medical_history_json TEXT,
+      total_paid REAL DEFAULT 0,
+      visit_count INTEGER DEFAULT 0,
+      follow_up_count INTEGER DEFAULT 0,
+      average_waiting_time_seconds INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS companions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patient_mobile TEXT,
+      companion_name TEXT,
+      FOREIGN KEY(patient_mobile) REFERENCES patients(mobile_number) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS medical_services (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      service_name TEXT UNIQUE,
+      category TEXT,
+      description TEXT,
+      price REAL,
+      is_disabled INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS visits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      patient_mobile TEXT,
+      visit_type TEXT,
+      status TEXT,
+      chief_complaint TEXT,
+      examination_notes TEXT,
+      diagnosis TEXT,
+      prescription_json TEXT,
+      referral_json TEXT,
+      weight REAL,
+      height REAL,
+      temperature REAL,
+      follow_up_days INTEGER,
+      follow_up_date TEXT,
+      follow_up_expiry_date TEXT,
+      paid_amount REAL DEFAULT 0,
+      payment_status TEXT,
+      is_exception_followup INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      closed_at DATETIME,
+      FOREIGN KEY(patient_mobile) REFERENCES patients(mobile_number)
+    );
+
+    CREATE TABLE IF NOT EXISTS visit_services (
+      visit_id INTEGER,
+      service_id INTEGER,
+      service_name TEXT,
+      price REAL,
+      PRIMARY KEY (visit_id, service_id),
+      FOREIGN KEY(visit_id) REFERENCES visits(id) ON DELETE CASCADE,
+      FOREIGN KEY(service_id) REFERENCES medical_services(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS employees (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      role TEXT,
+      base_salary REAL,
+      bonus REAL DEFAULT 0,
+      incentive REAL DEFAULT 0,
+      commission_percentage REAL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS inventory_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE,
+      supplier TEXT,
+      quantity INTEGER DEFAULT 0,
+      min_level INTEGER DEFAULT 0,
+      unit TEXT,
+      cost_price REAL DEFAULT 0,
+      selling_price REAL DEFAULT 0,
+      is_disabled INTEGER DEFAULT 0,
+      category TEXT,
+      item_type TEXT DEFAULT "quantity",
+      notes TEXT,
+      usage_count INTEGER DEFAULT 0,
+      billable INTEGER DEFAULT 0,
+      barcode TEXT,
+      qr_code TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS maintenance_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_name TEXT,
+      representative_name TEXT,
+      maintenance_date TEXT,
+      next_maintenance_date TEXT,
+      cost REAL DEFAULT 0,
+      notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS vouchers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT,
+      amount REAL,
+      recipient_payer TEXT,
+      description TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      username TEXT,
+      action TEXT,
+      details TEXT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- New Tables for Advanced medical ERP updates
+    CREATE TABLE IF NOT EXISTS examination_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT,
+      type TEXT,
+      option_value TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS refunds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      visit_id INTEGER NULL,
+      category TEXT,
+      patient_name TEXT,
+      amount REAL,
+      reason TEXT,
+      user_responsible TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS external_partners (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT,
+      name TEXT,
+      address TEXT,
+      phone TEXT,
+      notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS referrals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      visit_id INTEGER,
+      patient_name TEXT,
+      partner_id INTEGER,
+      partner_name TEXT,
+      medications_json TEXT,
+      supplies_json TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sender_username TEXT,
+      sender_fullname TEXT,
+      message_text TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS inventory_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      transaction_date TEXT,
+      patient_name TEXT,
+      patient_mobile TEXT,
+      visit_id INTEGER,
+      item_name TEXT,
+      quantity_used REAL,
+      user_responsible TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS visit_inventory_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      visit_id INTEGER,
+      item_id INTEGER,
+      item_name TEXT,
+      quantity REAL,
+      price REAL DEFAULT 0,
+      billable INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS treasury_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      opening_date TEXT,
+      opening_time TEXT,
+      opening_balance REAL,
+      opening_user TEXT,
+      closing_date TEXT,
+      closing_time TEXT,
+      closing_user TEXT,
+      expected_closing_balance REAL,
+      actual_closing_balance REAL,
+      difference REAL,
+      status TEXT DEFAULT 'open',
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS treasury_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      treasury_session_id INTEGER,
+      date TEXT,
+      time TEXT,
+      type TEXT,
+      amount REAL,
+      description TEXT,
+      related_patient_mobile TEXT,
+      related_visit_id INTEGER,
+      user_responsible TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(treasury_session_id) REFERENCES treasury_sessions(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS treasury_expenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      treasury_transaction_id INTEGER,
+      category TEXT,
+      amount REAL,
+      date TEXT,
+      time TEXT,
+      description TEXT,
+      user_responsible TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(treasury_transaction_id) REFERENCES treasury_transactions(id) ON DELETE SET NULL
+    );
+
+    -- Pre-seed default Administrator (password: admin)
+    INSERT OR IGNORE INTO users (id, username, password_hash, role, full_name) 
+    VALUES (1, 'admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', 'admin', 'مدير النظام الافتراضي');
+
+    -- Pre-seed default settings to bypass Setup Wizard
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('clinicName', 'العيادة الطبية التخصصية');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('doctorName', 'أحمد ياسر');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('doctorSpecialty', 'القلب والأوعية الدموية');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('doctorTitle', 'استشاري أمراض القلب والأوعية');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('clinicAddress', 'القاهرة، مصر');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('clinicPhones', '01012345678');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('useInventory', 'true');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('companionAgeThreshold', '12');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('companionConsultationFee', '100');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('companionFollowupFee', '50');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('enableVitalsGlobal', 'true');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('enableVitalsReception', 'true');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('enableVitalsDoctor', 'true');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('diagnosisTiming', 'before_and_after');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('customVitalsList', '[{"id":"weight","nameAr":"الوزن","nameEn":"Weight","unit":"kg"},{"id":"height","nameAr":"الطول","nameEn":"Height","unit":"cm"},{"id":"temp","nameAr":"الحرارة","nameEn":"Temperature","unit":"°C"}]');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('customChronicDiseases', '["السكري / Diabetes", "ضغط الدم / Hypertension", "أمراض القلب / Heart Disease", "حساسية الصدر / Asthma"]');
+
+    CREATE TABLE IF NOT EXISTS whatsapp_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      log_date TEXT,
+      log_time TEXT,
+      patient_name TEXT,
+      phone_number TEXT,
+      message_type TEXT,
+      message_text TEXT,
+      delivery_status TEXT,
+      error_details TEXT,
+      user_responsible TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Run SQLite Alters in try-catch blocks
+  const alterColumns = [
+    'ALTER TABLE visits ADD COLUMN waiting_time_seconds INTEGER DEFAULT 0',
+    'ALTER TABLE visits ADD COLUMN consultation_start_time TEXT',
+    'ALTER TABLE visits ADD COLUMN consultation_end_time TEXT',
+    'ALTER TABLE visits ADD COLUMN consultation_duration_seconds INTEGER DEFAULT 0',
+    'ALTER TABLE visits ADD COLUMN satisfaction_status TEXT',
+    'ALTER TABLE visits ADD COLUMN change_amount REAL DEFAULT 0',
+    'ALTER TABLE visits ADD COLUMN remaining_amount REAL DEFAULT 0',
+    'ALTER TABLE visits ADD COLUMN payment_date TEXT',
+    'ALTER TABLE visits ADD COLUMN payment_time TEXT',
+    'ALTER TABLE visits ADD COLUMN payment_user TEXT',
+    'ALTER TABLE companions ADD COLUMN age INTEGER',
+    'ALTER TABLE companions ADD COLUMN chief_complaint TEXT',
+    'ALTER TABLE patients ADD COLUMN parent_mobile TEXT',
+    'ALTER TABLE patients ADD COLUMN is_companion INTEGER DEFAULT 0',
+    'ALTER TABLE visits ADD COLUMN is_resumed INTEGER DEFAULT 0',
+    'ALTER TABLE visits ADD COLUMN diagnosis_after TEXT',
+    'ALTER TABLE patients ADD COLUMN average_waiting_time_seconds INTEGER DEFAULT 0',
+    'ALTER TABLE employees ADD COLUMN username TEXT',
+    'ALTER TABLE employees ADD COLUMN salary_day INTEGER DEFAULT 30',
+    'ALTER TABLE employees ADD COLUMN last_paid_month TEXT',
+    'ALTER TABLE visits ADD COLUMN inventory_deducted INTEGER DEFAULT 0',
+    'ALTER TABLE inventory_items ADD COLUMN category TEXT',
+    'ALTER TABLE inventory_items ADD COLUMN item_type TEXT DEFAULT "quantity"',
+    'ALTER TABLE inventory_items ADD COLUMN notes TEXT',
+    'ALTER TABLE inventory_items ADD COLUMN usage_count INTEGER DEFAULT 0',
+    'ALTER TABLE inventory_items ADD COLUMN billable INTEGER DEFAULT 0',
+    'ALTER TABLE inventory_items ADD COLUMN barcode TEXT',
+    'ALTER TABLE inventory_items ADD COLUMN qr_code TEXT',
+    'ALTER TABLE patients ADD COLUMN file_number TEXT',
+    'ALTER TABLE patients ADD COLUMN registration_date TEXT',
+    'ALTER TABLE patients ADD COLUMN registration_time TEXT',
+    'ALTER TABLE patients ADD COLUMN whatsapp_enabled INTEGER DEFAULT 1',
+    'ALTER TABLE visits ADD COLUMN followup_reminder_sent INTEGER DEFAULT 0',
+    'ALTER TABLE visits ADD COLUMN vitals_json TEXT',
+    'ALTER TABLE patients ADD COLUMN vitals_json TEXT',
+    'ALTER TABLE settings ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE patients ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE companions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE medical_services ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE visits ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE visit_services ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE employees ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE inventory_items ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE maintenance_records ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE vouchers ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE audit_logs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE examination_templates ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE refunds ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE external_partners ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE referrals ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE chat_messages ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE inventory_transactions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE visit_inventory_items ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE treasury_sessions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE treasury_transactions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE treasury_expenses ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE whatsapp_logs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE notifications ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP',
+    'ALTER TABLE reports ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP'
+  ];
+  for (const sql of alterColumns) {
+    try {
+      sqliteDb.run(sql);
+    } catch (e) {
+      // Column already exists, ignore
+    }
+  }
+
+  // Create SQLite update triggers to auto-update updated_at on change
+  const tablesToTrigger = [
+    { name: 'settings', pk: 'key' },
+    { name: 'users', pk: 'id' },
+    { name: 'patients', pk: 'mobile_number' },
+    { name: 'companions', pk: 'id' },
+    { name: 'medical_services', pk: 'id' },
+    { name: 'visits', pk: 'id' },
+    { name: 'visit_services', pk: 'visit_id' },
+    { name: 'employees', pk: 'id' },
+    { name: 'inventory_items', pk: 'id' },
+    { name: 'maintenance_records', pk: 'id' },
+    { name: 'vouchers', pk: 'id' },
+    { name: 'audit_logs', pk: 'id' },
+    { name: 'examination_templates', pk: 'id' },
+    { name: 'refunds', pk: 'id' },
+    { name: 'external_partners', pk: 'id' },
+    { name: 'referrals', pk: 'id' },
+    { name: 'chat_messages', pk: 'id' },
+    { name: 'inventory_transactions', pk: 'id' },
+    { name: 'visit_inventory_items', pk: 'id' },
+    { name: 'treasury_sessions', pk: 'id' },
+    { name: 'treasury_transactions', pk: 'id' },
+    { name: 'treasury_expenses', pk: 'id' },
+    { name: 'whatsapp_logs', pk: 'id' },
+    { name: 'notifications', pk: 'id' },
+    { name: 'reports', pk: 'id' }
+  ];
+  for (const t of tablesToTrigger) {
+    try {
+      sqliteDb.run(`
+        CREATE TRIGGER IF NOT EXISTS trg_update_timestamp_${t.name}
+        AFTER UPDATE ON "${t.name}"
+        FOR EACH ROW
+        WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
+        BEGIN
+          UPDATE "${t.name}" SET updated_at = CURRENT_TIMESTAMP WHERE "${t.pk}" = NEW."${t.pk}";
+        END;
+      `);
+    } catch (e) {
+      // Ignore trigger creation error
+    }
+  }
+
+  try {
+    sqliteDb.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_patients_file_number ON patients(file_number)');
+  } catch (e) {
+    // Ignore index exists
+  }
+
+  saveToDisk();
+  console.log('SQLite Migrations completed via sql.js Wasm.');
+}
+
+async function runMigrationsMySQL() {
+  const conn = await mysqlPool.getConnection();
+  try {
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS settings (
+        \`key\` VARCHAR(255) PRIMARY KEY,
+        value TEXT
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(255) UNIQUE,
+        password_hash VARCHAR(255),
+        role VARCHAR(50),
+        full_name VARCHAR(255),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS patients (
+        mobile_number VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(255),
+        gender VARCHAR(50),
+        age INT,
+        weight DOUBLE NULL,
+        height DOUBLE NULL,
+        temperature DOUBLE NULL,
+        chief_complaint TEXT NULL,
+        medical_history_json TEXT NULL,
+        total_paid DOUBLE DEFAULT 0,
+        visit_count INT DEFAULT 0,
+        follow_up_count INT DEFAULT 0,
+        average_waiting_time_seconds INT DEFAULT 0,
+        file_number VARCHAR(100) UNIQUE NULL,
+        registration_date VARCHAR(50) NULL,
+        registration_time VARCHAR(50) NULL,
+        whatsapp_enabled INT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS companions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        patient_mobile VARCHAR(100),
+        companion_name VARCHAR(255),
+        FOREIGN KEY(patient_mobile) REFERENCES patients(mobile_number) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS medical_services (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        service_name VARCHAR(255) UNIQUE,
+        category VARCHAR(255),
+        description TEXT NULL,
+        price DOUBLE,
+        is_disabled INT DEFAULT 0
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS visits (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        patient_mobile VARCHAR(100),
+        visit_type VARCHAR(50),
+        status VARCHAR(50),
+        chief_complaint TEXT NULL,
+        examination_notes TEXT NULL,
+        diagnosis TEXT NULL,
+        prescription_json TEXT NULL,
+        referral_json TEXT NULL,
+        weight DOUBLE NULL,
+        height DOUBLE NULL,
+        temperature DOUBLE NULL,
+        follow_up_days INT NULL,
+        follow_up_date VARCHAR(50) NULL,
+        follow_up_expiry_date VARCHAR(50) NULL,
+        paid_amount DOUBLE DEFAULT 0,
+        payment_status VARCHAR(50),
+        is_exception_followup INT DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        closed_at DATETIME NULL,
+        FOREIGN KEY(patient_mobile) REFERENCES patients(mobile_number)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS visit_services (
+        visit_id INT,
+        service_id INT,
+        service_name VARCHAR(255),
+        price DOUBLE,
+        PRIMARY KEY (visit_id, service_id),
+        FOREIGN KEY(visit_id) REFERENCES visits(id) ON DELETE CASCADE,
+        FOREIGN KEY(service_id) REFERENCES medical_services(id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS employees (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255),
+        role VARCHAR(255),
+        base_salary DOUBLE,
+        bonus DOUBLE DEFAULT 0,
+        incentive DOUBLE DEFAULT 0,
+        commission_percentage DOUBLE DEFAULT 0
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS inventory_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) UNIQUE,
+        supplier VARCHAR(255) NULL,
+        quantity INT DEFAULT 0,
+        min_level INT DEFAULT 0,
+        unit VARCHAR(50) NULL,
+        cost_price DOUBLE DEFAULT 0,
+        selling_price DOUBLE DEFAULT 0,
+        is_disabled INT DEFAULT 0,
+        category VARCHAR(255) NULL,
+        item_type VARCHAR(100) DEFAULT 'quantity',
+        notes TEXT NULL,
+        usage_count INT DEFAULT 0,
+        billable INT DEFAULT 0,
+        barcode VARCHAR(100) NULL,
+        qr_code VARCHAR(100) NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS maintenance_records (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        device_name VARCHAR(255),
+        representative_name VARCHAR(255) NULL,
+        maintenance_date VARCHAR(50),
+        next_maintenance_date VARCHAR(50),
+        cost DOUBLE DEFAULT 0,
+        notes TEXT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS vouchers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        type VARCHAR(50),
+        amount DOUBLE,
+        recipient_payer VARCHAR(255),
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        username VARCHAR(255),
+        action VARCHAR(255),
+        details TEXT NULL,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // New Tables for Advanced medical ERP updates (MySQL)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS examination_templates (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        category VARCHAR(255),
+        type VARCHAR(255),
+        option_value TEXT
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS refunds (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        visit_id INT NULL,
+        category VARCHAR(255),
+        patient_name VARCHAR(255),
+        amount DOUBLE,
+        reason TEXT,
+        user_responsible VARCHAR(255),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS external_partners (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        type VARCHAR(255),
+        name VARCHAR(255),
+        address VARCHAR(255),
+        phone VARCHAR(255),
+        notes TEXT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS referrals (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        visit_id INT,
+        patient_name VARCHAR(255),
+        partner_id INT,
+        partner_name VARCHAR(255),
+        medications_json TEXT NULL,
+        supplies_json TEXT NULL,
+        notes TEXT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        sender_username VARCHAR(255),
+        sender_fullname VARCHAR(255),
+        message_text TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS inventory_transactions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        transaction_date VARCHAR(50),
+        patient_name VARCHAR(255) NULL,
+        patient_mobile VARCHAR(100) NULL,
+        visit_id INT NULL,
+        item_name VARCHAR(255),
+        quantity_used DOUBLE,
+        user_responsible VARCHAR(255),
+        notes TEXT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS visit_inventory_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        visit_id INT,
+        item_id INT,
+        item_name VARCHAR(255),
+        quantity DOUBLE,
+        price DOUBLE DEFAULT 0,
+        billable INT DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS whatsapp_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        log_date VARCHAR(50),
+        log_time VARCHAR(50),
+        patient_name VARCHAR(255),
+        phone_number VARCHAR(100),
+        message_type VARCHAR(100),
+        message_text TEXT,
+        delivery_status VARCHAR(50),
+        error_details TEXT,
+        user_responsible VARCHAR(255),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS treasury_sessions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        opening_date VARCHAR(50),
+        opening_time VARCHAR(50),
+        opening_balance DOUBLE,
+        opening_user VARCHAR(255),
+        closing_date VARCHAR(50) NULL,
+        closing_time VARCHAR(50) NULL,
+        closing_user VARCHAR(255) NULL,
+        expected_closing_balance DOUBLE NULL,
+        actual_closing_balance DOUBLE NULL,
+        difference DOUBLE NULL,
+        status VARCHAR(50) DEFAULT 'open',
+        notes TEXT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS treasury_transactions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        treasury_session_id INT NULL,
+        date VARCHAR(50),
+        time VARCHAR(50),
+        type VARCHAR(50),
+        amount DOUBLE,
+        description TEXT,
+        related_patient_mobile VARCHAR(100) NULL,
+        related_visit_id INT NULL,
+        user_responsible VARCHAR(255),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(treasury_session_id) REFERENCES treasury_sessions(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS treasury_expenses (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        treasury_transaction_id INT NULL,
+        category VARCHAR(255),
+        amount DOUBLE,
+        date VARCHAR(50),
+        time VARCHAR(50),
+        description TEXT,
+        user_responsible VARCHAR(255),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(treasury_transaction_id) REFERENCES treasury_transactions(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    // Run MySQL Alters in try-catch blocks
+    const mysqlAlters = [
+      'ALTER TABLE visits ADD COLUMN waiting_time_seconds INT DEFAULT 0',
+      'ALTER TABLE visits ADD COLUMN consultation_start_time VARCHAR(100) NULL',
+      'ALTER TABLE visits ADD COLUMN consultation_end_time VARCHAR(100) NULL',
+      'ALTER TABLE visits ADD COLUMN consultation_duration_seconds INT DEFAULT 0',
+      'ALTER TABLE visits ADD COLUMN satisfaction_status VARCHAR(100) NULL',
+      'ALTER TABLE visits ADD COLUMN change_amount DOUBLE DEFAULT 0',
+      'ALTER TABLE visits ADD COLUMN remaining_amount DOUBLE DEFAULT 0',
+      'ALTER TABLE visits ADD COLUMN payment_date VARCHAR(50) NULL',
+      'ALTER TABLE visits ADD COLUMN payment_time VARCHAR(50) NULL',
+      'ALTER TABLE visits ADD COLUMN payment_user VARCHAR(255) NULL',
+      'ALTER TABLE companions ADD COLUMN age INT NULL',
+      'ALTER TABLE companions ADD COLUMN chief_complaint TEXT NULL',
+      'ALTER TABLE patients ADD COLUMN parent_mobile VARCHAR(100) NULL',
+      'ALTER TABLE patients ADD COLUMN is_companion INT DEFAULT 0',
+      'ALTER TABLE visits ADD COLUMN is_resumed INT DEFAULT 0',
+      'ALTER TABLE visits ADD COLUMN diagnosis_after TEXT NULL',
+      'ALTER TABLE patients ADD COLUMN average_waiting_time_seconds INT DEFAULT 0',
+      'ALTER TABLE employees ADD COLUMN username VARCHAR(255) NULL',
+      'ALTER TABLE employees ADD COLUMN salary_day INT DEFAULT 30',
+      'ALTER TABLE employees ADD COLUMN last_paid_month VARCHAR(50) NULL',
+      'ALTER TABLE visits ADD COLUMN inventory_deducted INT DEFAULT 0',
+      'ALTER TABLE inventory_items ADD COLUMN category VARCHAR(255) NULL',
+      'ALTER TABLE inventory_items ADD COLUMN item_type VARCHAR(100) DEFAULT \'quantity\'',
+      'ALTER TABLE inventory_items ADD COLUMN notes TEXT NULL',
+      'ALTER TABLE inventory_items ADD COLUMN usage_count INT DEFAULT 0',
+      'ALTER TABLE inventory_items ADD COLUMN billable INT DEFAULT 0',
+      'ALTER TABLE inventory_items ADD COLUMN barcode VARCHAR(100) NULL',
+      'ALTER TABLE inventory_items ADD COLUMN qr_code VARCHAR(100) NULL',
+      'ALTER TABLE patients ADD COLUMN file_number VARCHAR(100) UNIQUE NULL',
+      'ALTER TABLE patients ADD COLUMN registration_date VARCHAR(50) NULL',
+      'ALTER TABLE patients ADD COLUMN registration_time VARCHAR(50) NULL',
+      'ALTER TABLE visits ADD COLUMN followup_reminder_sent INT DEFAULT 0',
+      'ALTER TABLE visits ADD COLUMN vitals_json TEXT NULL',
+      'ALTER TABLE patients ADD COLUMN vitals_json TEXT NULL',
+      'ALTER TABLE settings ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE patients ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE companions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE medical_services ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE visits ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE visit_services ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE employees ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE inventory_items ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE maintenance_records ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE vouchers ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE audit_logs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE examination_templates ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE refunds ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE external_partners ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE referrals ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE chat_messages ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE inventory_transactions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE visit_inventory_items ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE treasury_sessions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE treasury_transactions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE treasury_expenses ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE whatsapp_logs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE notifications ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      'ALTER TABLE reports ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+    ];
+    for (const sql of mysqlAlters) {
+      try {
+        await conn.query(sql);
+      } catch (e) {
+        // Column already exists
+      }
+    }
+
+    // Pre-seed default Administrator (password: admin) for MySQL
+    await conn.query(`
+      INSERT IGNORE INTO users (id, username, password_hash, role, full_name) 
+      VALUES (1, 'admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', 'admin', 'مدير النظام الافتراضي')
+    `);
+
+    console.log('MySQL Migrations completed.');
+  } catch (err) {
+    console.error('MySQL Migration Error:', err);
+  } finally {
+    conn.release();
   }
 }
 
@@ -280,7 +1045,6 @@ module.exports = {
   queryOne,
   runCommand,
   logAudit,
-  asyncLocalStorage,
   getDbType: () => dbType,
   getDbPath: () => dbPath
 };

@@ -6,33 +6,12 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
-const sync = require('./sync');
-const jwt = require('jsonwebtoken');
+const secureCrypto = require('./crypto');
+const whatsappService = require('./whatsapp-service');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-
-// Middleware to wrap every request in AsyncLocalStorage context for multi-tenant RLS propagation
-app.use((req, res, next) => {
-  let userId = null;
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    try {
-      const decoded = jwt.decode(token);
-      if (decoded && decoded.sub) {
-        userId = decoded.sub;
-      }
-    } catch (e) {
-      console.error('Failed to decode JWT token in middleware:', e);
-    }
-  }
-  
-  db.asyncLocalStorage.run({ userId }, () => {
-    next();
-  });
-});
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -92,6 +71,157 @@ function parseDbDate(dateStr) {
   }
   return new Date(s);
 }
+
+// Get all system settings from database and decrypt credentials
+async function getSystemSettings() {
+  try {
+    const rows = await db.queryAll('SELECT * FROM settings');
+    const settings = {};
+    rows.forEach(r => {
+      let val = r.value;
+      if (['whatsappAccessToken', 'whatsappPhoneNumberId', 'whatsappBusinessAccountId'].includes(r.key)) {
+        val = secureCrypto.decrypt(r.value);
+      }
+      settings[r.key] = val;
+    });
+    return settings;
+  } catch (err) {
+    console.error('Error fetching settings:', err);
+    return {};
+  }
+}
+
+// PDF Generation using PDFKit
+const PDFDocument = require('pdfkit');
+function generatePrescriptionPdf(visit, patient, settings) {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'A5', margin: 30 });
+      const chunks = [];
+      doc.on('data', chunk => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', err => reject(err));
+
+      // Attempt to load system font for Unicode support (Arabic)
+      let hasArabicFont = false;
+      const winFont = 'C:\\Windows\\Fonts\\arial.ttf';
+      if (fs.existsSync(winFont)) {
+        try {
+          doc.registerFont('ArabicFont', winFont);
+          doc.font('ArabicFont');
+          hasArabicFont = true;
+        } catch (e) {
+          console.error('Failed to register system Arabic font:', e);
+        }
+      }
+
+      // Title/Header
+      doc.fontSize(16).text(settings.clinicName || 'Clinic Prescription', { align: 'center' });
+      doc.fontSize(10).text(`Doctor: ${settings.doctorName || ''} (${settings.doctorSpecialty || ''})`, { align: 'center' });
+      doc.moveDown(1);
+      doc.moveTo(30, doc.y).lineTo(doc.page.width - 30, doc.y).stroke();
+      doc.moveDown(1);
+
+      // Patient Details
+      doc.fontSize(10);
+      doc.text(`Patient: ${patient.name || ''}`);
+      doc.text(`Date: ${visit.created_at ? new Date(visit.created_at).toLocaleDateString() : new Date().toLocaleDateString()}`);
+      doc.text(`File No: ${patient.file_number || ''}`);
+      doc.moveDown(1);
+      doc.moveTo(30, doc.y).lineTo(doc.page.width - 30, doc.y).stroke();
+      doc.moveDown(1);
+
+      // Prescription Section
+      doc.fontSize(14).text('Rx:', { underline: true });
+      doc.moveDown(0.5);
+
+      let meds = [];
+      try {
+        meds = JSON.parse(visit.prescription_json || '[]');
+      } catch (e) {
+        meds = [];
+      }
+
+      if (Array.isArray(meds) && meds.length > 0) {
+        meds.forEach((med, index) => {
+          doc.fontSize(11).text(`${index + 1}. ${med.name || med.medicineName || ''} - ${med.dosage || ''} (${med.duration || ''})`);
+        });
+      } else {
+        doc.fontSize(11).text('No medications prescribed.');
+      }
+
+      doc.moveDown(1);
+      if (visit.diagnosis) {
+        doc.fontSize(10).text(`Diagnosis: ${visit.diagnosis}`);
+      }
+
+      // Footer
+      doc.moveTo(30, doc.page.height - 50).lineTo(doc.page.width - 30, doc.page.height - 50).stroke();
+      doc.fontSize(8).text(`Address: ${settings.clinicAddress || ''} | Phone: ${settings.clinicPhones || ''}`, 30, doc.page.height - 40, { align: 'center', width: doc.page.width - 60 });
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// Background scheduler for daily follow-up reminders
+async function sendFollowUpReminders() {
+  try {
+    const settings = await getSystemSettings();
+    if (settings.whatsappEnabled !== 'true' || settings.whatsappAutoSendReminder !== 'true') {
+      return;
+    }
+
+    const nDays = parseInt(settings.whatsappFollowupDaysBefore || '1');
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + nDays);
+    const targetDateStr = targetDate.toISOString().split('T')[0];
+
+    // Find visits where follow_up_date = targetDateStr, status = 'closed', and followup_reminder_sent = 0
+    const visits = await db.queryAll(
+      `SELECT v.*, p.name as patient_name, p.whatsapp_enabled as patient_whatsapp 
+       FROM visits v
+       JOIN patients p ON v.patient_mobile = p.mobile_number
+       WHERE v.follow_up_date = ? AND v.followup_reminder_sent = 0 AND p.whatsapp_enabled != 0`,
+      [targetDateStr]
+    );
+
+    for (const visit of visits) {
+      const sentResult = await whatsappService.sendWhatsApp({
+        settings,
+        to: visit.patient_mobile,
+        messageType: 'reminder',
+        variables: {
+          PatientName: visit.patient_name,
+          FollowUpDate: visit.follow_up_date,
+          ClinicName: settings.clinicName || 'العيادة',
+          DoctorName: settings.doctorName || ''
+        },
+        userResponsible: 'scheduler'
+      });
+
+      if (sentResult.success) {
+        await db.runCommand(
+          'UPDATE visits SET followup_reminder_sent = 1 WHERE id = ?',
+          [visit.id]
+        );
+      }
+    }
+  } catch (err) {
+    console.error('Failed to run daily follow-up scheduler:', err);
+  }
+}
+
+// Run follow-up reminder check once on startup after 10s, then every 24 hours
+setTimeout(() => {
+  sendFollowUpReminders();
+}, 10000);
+
+setInterval(() => {
+  sendFollowUpReminders();
+}, 24 * 60 * 60 * 1000);
 
 
 // --- MIDDLEWARES ---
@@ -468,19 +598,7 @@ app.get('/api/treasury/stats', async (req, res) => {
 // 1. Settings & Wizard Setup
 app.get('/api/settings', async (req, res) => {
   try {
-    const rows = await db.queryAll('SELECT * FROM settings');
-    const settings = {};
-    rows.forEach(r => {
-      settings[r.key] = r.value;
-    });
-    
-    // Fallback settings for anonymous/unauthenticated requests to bypass frontend wizard redirection
-    if (!settings.clinicName) {
-      settings.clinicName = 'DATAGRIS Clinic';
-      settings.doctorName = 'Doctor';
-      settings.useInventory = 'true';
-    }
-    
+    const settings = await getSystemSettings();
     res.json(settings);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -491,9 +609,13 @@ app.post('/api/settings', async (req, res) => {
   try {
     const settings = req.body;
     for (const [key, val] of Object.entries(settings)) {
+      let valueToStore = String(val);
+      if (['whatsappAccessToken', 'whatsappPhoneNumberId', 'whatsappBusinessAccountId'].includes(key)) {
+        valueToStore = secureCrypto.encrypt(valueToStore);
+      }
       await db.runCommand(
         'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?',
-        [key, String(val), String(val)]
+        [key, valueToStore, valueToStore]
       );
     }
     // Log audit
@@ -504,15 +626,19 @@ app.post('/api/settings', async (req, res) => {
     try {
       const settings = req.body;
       for (const [key, val] of Object.entries(settings)) {
+        let valueToStore = String(val);
+        if (['whatsappAccessToken', 'whatsappPhoneNumberId', 'whatsappBusinessAccountId'].includes(key)) {
+          valueToStore = secureCrypto.encrypt(valueToStore);
+        }
         if (db.getDbType() === 'mysql') {
           await db.runCommand(
             'INSERT INTO settings (\`key\`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?',
-            [key, String(val), String(val)]
+            [key, valueToStore, valueToStore]
           );
         } else {
           await db.runCommand(
             'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-            [key, String(val)]
+            [key, valueToStore]
           );
         }
       }
@@ -523,21 +649,46 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
+// WhatsApp API Endpoints
+app.post('/api/whatsapp/test-connection', async (req, res) => {
+  try {
+    const settings = req.body;
+    const provider = whatsappService.getWhatsAppProvider(settings);
+    await provider.testConnection();
+    res.json({ success: true, message: 'تم الاتصال بنجاح' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/whatsapp/logs', async (req, res) => {
+  try {
+    const logs = await db.queryAll('SELECT * FROM whatsapp_logs ORDER BY id DESC LIMIT 200');
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/setup/wizard', async (req, res) => {
   try {
     const { clinicSettings, adminUser } = req.body;
     
     // Save settings
     for (const [key, val] of Object.entries(clinicSettings)) {
+      let valueToStore = String(val);
+      if (['whatsappAccessToken', 'whatsappPhoneNumberId', 'whatsappBusinessAccountId'].includes(key)) {
+        valueToStore = secureCrypto.encrypt(valueToStore);
+      }
       if (db.getDbType() === 'mysql') {
         await db.runCommand(
           'INSERT INTO settings (\`key\`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?',
-          [key, String(val), String(val)]
+          [key, valueToStore, valueToStore]
         );
       } else {
         await db.runCommand(
           'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-          [key, String(val)]
+          [key, valueToStore]
         );
       }
     }
@@ -584,131 +735,39 @@ app.post('/api/setup/wizard', async (req, res) => {
   }
 });
 
-function getBillingUrl() {
-  if (process.env.BILLING_APP_URL) return process.env.BILLING_APP_URL;
-  if (process.env.BILLING_URL) return process.env.BILLING_URL;
-  try {
-    const configPath = path.join(process.env.USER_DATA_PATH || __dirname, 'clinic_config.json');
-    if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      return config.billingUrl || 'https://clinic.datagris.com';
-    }
-  } catch (e) {}
-  return 'https://clinic.datagris.com';
-}
-
 // 2. Authentication
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
-    const response = await fetch(`${getBillingUrl()}/api/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ username, password })
-    });
-    if (!response.ok) {
-      const errText = await response.text();
-      let errObj;
-      try { errObj = JSON.parse(errText); } catch(e) {}
-      return res.status(response.status).json({ error: errObj?.error || 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+    const user = await db.queryOne('SELECT * FROM users WHERE username = ?', [username]);
+    if (!user) {
+      return res.status(401).json({ error: 'اسم المستخدم غير صحيح' });
     }
-    const data = await response.json(); // { success: true, user: { id, username, role, fullName, clinicId }, jwt }
-    
-    // Save JWT in global session
-    global.userJwt = data.jwt;
-    
-    // Update local configuration with clinicId
-    try {
-      const configPath = path.join(process.env.USER_DATA_PATH || __dirname, 'clinic_config.json');
-      if (fs.existsSync(configPath)) {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        config.clinicId = data.user.clinicId;
-        config.subscriptionStatus = 'active'; // assume active if login was successful
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
-        console.log('Saved clinic ID to local config:', data.user.clinicId);
-      }
-    } catch (e) {
-      console.error('Failed to update clinic ID in configuration file:', e);
+    const hash = hashPassword(password);
+    if (user.password_hash !== hash) {
+      return res.status(401).json({ error: 'كلمة المرور غير صحيحة' });
     }
-
-    // Cache user credentials locally (SHA-256 hash) for offline fallback authentication
-    try {
-      const passHash = hashPassword(password);
-      const existingUser = await db.queryOne('SELECT * FROM users WHERE id = ?', [data.user.id]);
-      if (existingUser) {
-        await db.runCommand(
-          'UPDATE users SET username = ?, password_hash = ?, role = ?, full_name = ? WHERE id = ?',
-          [data.user.username.trim().toLowerCase(), passHash, data.user.role, data.user.fullName, data.user.id]
-        );
-      } else {
-        await db.runCommand(
-          'INSERT INTO users (id, username, password_hash, role, full_name) VALUES (?, ?, ?, ?, ?)',
-          [data.user.id, data.user.username.trim().toLowerCase(), passHash, data.user.role, data.user.fullName]
-        );
-      }
-    } catch (e) {
-      console.error('Failed to cache user profile locally:', e);
-    }
-    
-    // Log audit in Supabase
-    await db.logAudit(data.user.id, data.user.username, 'USER_LOGIN', `User logged in as ${data.user.role}`);
-    
+    await db.logAudit(user.id, user.username, 'USER_LOGIN', `User logged in as ${user.role}`);
     res.json({
       success: true,
       user: {
-        id: data.user.id,
-        username: data.user.username,
-        role: data.user.role,
-        fullName: data.user.fullName
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        fullName: user.full_name
       }
     });
   } catch (err) {
-    console.error('Online login failed or unreachable. Falling back to local offline login...', err);
-    try {
-      const user = await db.queryOne('SELECT * FROM users WHERE username = ?', [username.trim().toLowerCase()]);
-      if (!user) {
-        return res.status(401).json({ error: 'اسم المستخدم غير صحيح أو عيادتكم غير متصلة بالإنترنت حالياً' });
-      }
-      
-      const hash = hashPassword(password);
-      if (user.password_hash !== hash) {
-        return res.status(401).json({ error: 'كلمة المرور غير صحيحة' });
-      }
-      
-      // Log audit locally
-      await db.logAudit(user.id, user.username, 'USER_LOGIN_OFFLINE', `User logged in offline as ${user.role}`);
-      
-      res.json({
-        success: true,
-        user: {
-          id: user.id,
-          username: user.username,
-          role: user.role,
-          fullName: user.full_name
-        }
-      });
-    } catch (localErr) {
-      console.error('Local offline login error:', localErr);
-      res.status(500).json({ error: 'تعذر إتمام عملية تسجيل الدخول محلياً' });
-    }
+    res.status(500).json({ error: err.message });
   }
 });
 
-// 2b. User Accounts Management (Admin Actions - Integrated with Supabase Auth & Profiles)
+// 2b. User Accounts Management (Admin Actions)
 app.get('/api/users', async (req, res) => {
   try {
-    const rows = await db.queryAll('SELECT id, username, role, full_name, created_at FROM profiles ORDER BY id ASC');
-    res.json(rows.map(r => ({
-      id: r.id,
-      username: r.username,
-      role: r.role,
-      fullName: r.full_name,
-      createdAt: r.created_at
-    })));
+    const rows = await db.queryAll('SELECT id, username, role, full_name, created_at FROM users ORDER BY id ASC');
+    res.json(rows);
   } catch (err) {
-    console.error('Failed to get profiles:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -716,128 +775,50 @@ app.get('/api/users', async (req, res) => {
 app.post('/api/users', async (req, res) => {
   const { username, password, role, fullName } = req.body;
   try {
-    // 1. Check if user already exists
-    const existing = await db.queryOne('SELECT * FROM profiles WHERE username = ?', [username.trim().toLowerCase()]);
+    const existing = await db.queryOne('SELECT * FROM users WHERE username = ?', [username]);
     if (existing) {
       return res.status(400).json({ error: 'اسم المستخدم مسجل مسبقاً' });
     }
-
-    // 2. Create in Supabase Auth via Admin SDK
-    const supabaseUrl = process.env.SUPABASE_URL || 'https://whfegxabypqkvnmfwfqj.supabase.co';
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseServiceKey) {
-      return res.status(500).json({ error: 'مفتاح خدمة Supabase (Service Role Key) غير متوفر في الخادم' });
-    }
-
-    const { createClient } = require('@supabase/supabase-js');
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    });
-
-    // Helper to get clinic_id
-    const dataDir = process.env.USER_DATA_PATH || __dirname;
-    let clinicId = process.env.CLINIC_ID || 'CLN-000001';
-    try {
-      const configPath = path.join(dataDir, 'clinic_config.json');
-      if (fs.existsSync(configPath)) {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        clinicId = config.clinicId || clinicId;
-      }
-    } catch (e) {}
-
-    const email = `${username.trim().toLowerCase()}@datagris-auth.com`;
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { clinic_id: clinicId }
-    });
-
-    if (authError || !authData.user) {
-      console.error('Supabase Auth user creation error:', authError);
-      return res.status(400).json({ error: authError?.message || 'فشل إنشاء حساب مستخدم سحابي' });
-    }
-
-    const userId = authData.user.id;
-
-    // 3. Create profile in database
+    const hash = hashPassword(password);
     await db.runCommand(
-      'INSERT INTO profiles (id, clinic_id, username, full_name, role) VALUES (?, ?, ?, ?, ?)',
-      [userId, clinicId, username.trim().toLowerCase(), fullName, role]
+      'INSERT INTO users (username, password_hash, role, full_name) VALUES (?, ?, ?, ?)',
+      [username, hash, role, fullName]
     );
-
     res.json({ success: true });
   } catch (err) {
-    console.error('Failed to create user:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.put('/api/users/:id', async (req, res) => {
   const { username, password, role, fullName } = req.body;
-  const userId = req.params.id;
   try {
-    // 1. Update profile details
-    await db.runCommand(
-      'UPDATE profiles SET username = ?, role = ?, full_name = ? WHERE id = ?',
-      [username.trim().toLowerCase(), role, fullName, userId]
-    );
-
-    // 2. If password updated, invoke Supabase Admin SDK
-    if (password) {
-      const supabaseUrl = process.env.SUPABASE_URL || 'https://whfegxabypqkvnmfwfqj.supabase.co';
-      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (supabaseServiceKey) {
-        const { createClient } = require('@supabase/supabase-js');
-        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-          auth: { autoRefreshToken: false, persistSession: false }
-        });
-        const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, { password });
-        if (updateError) {
-          console.error('Supabase Auth password update error:', updateError);
-        }
-      }
+    const hash = password ? hashPassword(password) : null;
+    if (hash) {
+      await db.runCommand(
+        'UPDATE users SET username = ?, password_hash = ?, role = ?, full_name = ? WHERE id = ?',
+        [username, hash, role, fullName, req.params.id]
+      );
+    } else {
+      await db.runCommand(
+        'UPDATE users SET username = ?, role = ?, full_name = ? WHERE id = ?',
+        [username, role, fullName, req.params.id]
+      );
     }
-
     res.json({ success: true });
   } catch (err) {
-    console.error('Failed to update user:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.delete('/api/users/:id', async (req, res) => {
-  const userId = req.params.id;
   try {
-    // Prevent deletion of main owner/admin
-    const profile = await db.queryOne('SELECT role FROM profiles WHERE id = ?', [userId]);
-    if (profile && profile.role === 'owner') {
-      return res.status(400).json({ error: 'لا يمكن حذف حساب مالك النظام الرئيسي' });
+    if (parseInt(req.params.id) === 1) {
+      return res.status(400).json({ error: 'لا يمكن حذف حساب مدير النظام الافتراضي' });
     }
-
-    // 1. Delete profile details
-    await db.runCommand('DELETE FROM profiles WHERE id = ?', [userId]);
-
-    // 2. Delete Supabase Auth account
-    const supabaseUrl = process.env.SUPABASE_URL || 'https://whfegxabypqkvnmfwfqj.supabase.co';
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (supabaseServiceKey) {
-      const { createClient } = require('@supabase/supabase-js');
-      const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-        auth: { autoRefreshToken: false, persistSession: false }
-      });
-      const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
-      if (deleteError) {
-        console.error('Supabase Auth user delete error:', deleteError);
-      }
-    }
-
+    await db.runCommand('DELETE FROM users WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
-    console.error('Failed to delete user:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -868,7 +849,7 @@ app.get('/api/patients', async (req, res) => {
 });
 
 app.post('/api/patients', async (req, res) => {
-  const { mobileNumber, name, gender, age, weight, height, temperature, chiefComplaint, medicalHistory, whatsappEnabled } = req.body;
+  const { mobileNumber, name, gender, age, weight, height, temperature, chiefComplaint, medicalHistory, whatsappEnabled, vitalsJson } = req.body;
   try {
     // Check if patient exists
     const existing = await db.queryOne('SELECT * FROM patients WHERE mobile_number = ?', [mobileNumber]);
@@ -879,9 +860,9 @@ app.post('/api/patients', async (req, res) => {
       fileNumber = existing.file_number;
       // Update info
       await db.runCommand(
-        `UPDATE patients SET name = ?, gender = ?, age = ?, weight = ?, height = ?, temperature = ?, chief_complaint = ?, medical_history_json = ?, whatsapp_enabled = ? 
+        `UPDATE patients SET name = ?, gender = ?, age = ?, weight = ?, height = ?, temperature = ?, chief_complaint = ?, medical_history_json = ?, whatsapp_enabled = ?, vitals_json = ? 
          WHERE mobile_number = ?`,
-        [name, gender, age, weight, height, temperature, chiefComplaint, JSON.stringify(medicalHistory || {}), wsEnabled, mobileNumber]
+        [name, gender, age, weight, height, temperature, chiefComplaint, JSON.stringify(medicalHistory || {}), wsEnabled, vitalsJson || null, mobileNumber]
       );
     } else {
       // Generate unique file number PAT-XXXXXX
@@ -900,13 +881,30 @@ app.post('/api/patients', async (req, res) => {
 
       // Create new
       await db.runCommand(
-        `INSERT INTO patients (mobile_number, name, gender, age, weight, height, temperature, chief_complaint, medical_history_json, file_number, registration_date, registration_time, whatsapp_enabled) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO patients (mobile_number, name, gender, age, weight, height, temperature, chief_complaint, medical_history_json, file_number, registration_date, registration_time, whatsapp_enabled, vitals_json) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           mobileNumber, name, gender, age, weight, height, temperature, chiefComplaint, 
-          JSON.stringify(medicalHistory || {}), fileNumber, todayStr, timeStr, wsEnabled
+          JSON.stringify(medicalHistory || {}), fileNumber, todayStr, timeStr, wsEnabled, vitalsJson || null
         ]
       );
+
+      // Send welcome message if whatsapp is enabled globally and for patient
+      const settings = await getSystemSettings();
+      if (settings.whatsappEnabled === 'true' && wsEnabled === 1) {
+        whatsappService.sendWhatsApp({
+          settings,
+          to: mobileNumber,
+          messageType: 'welcome',
+          variables: {
+            PatientName: name,
+            FileNumber: fileNumber,
+            ClinicName: settings.clinicName || 'العيادة',
+            DoctorName: settings.doctorName || ''
+          },
+          userResponsible: 'system'
+        }).catch(err => console.error('Error sending welcome WhatsApp:', err));
+      }
     }
     res.json({ success: true, mobileNumber, fileNumber });
   } catch (err) {
@@ -1019,7 +1017,7 @@ app.post('/api/visits', async (req, res) => {
   const { 
     patientMobile, visitType, services, weight, height, temperature, 
     chiefComplaint, paidAmount, paymentStatus, isException,
-    changeAmount, remainingAmount, paymentUser 
+    changeAmount, remainingAmount, paymentUser, vitalsJson 
   } = req.body;
   
   try {
@@ -1096,13 +1094,14 @@ app.post('/api/visits', async (req, res) => {
       `INSERT INTO visits (
         patient_mobile, visit_type, status, weight, height, temperature, chief_complaint, 
         paid_amount, payment_status, is_exception_followup, change_amount, remaining_amount, 
-        payment_date, payment_time, payment_user
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        payment_date, payment_time, payment_user, vitals_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         patientMobile, visitType, status, 
         weight || null, height || null, temperature || null, chiefComplaint || null,
         parentPaid, paymentStatus, isException ? 1 : 0, 
-        actualChange, actualRemaining, todayStr, timeStr, paymentUser || 'receptionist'
+        actualChange, actualRemaining, todayStr, timeStr, paymentUser || 'receptionist',
+        vitalsJson || null
       ]
     );
     const visitId = result.insertId;
@@ -1399,6 +1398,31 @@ app.put('/api/visits/:id/status', async (req, res) => {
         'UPDATE patients SET average_waiting_time_seconds = ? WHERE mobile_number = ?',
         [patientAvgWait, visit.patient_mobile]
       );
+
+      // Send WhatsApp prescription
+      try {
+        const settings = await getSystemSettings();
+        const patient = await db.queryOne('SELECT * FROM patients WHERE mobile_number = ?', [visit.patient_mobile]);
+        if (settings.whatsappEnabled === 'true' && settings.whatsappAutoSendPrescription === 'true' && patient && patient.whatsapp_enabled !== 0) {
+          const pdfBuffer = await generatePrescriptionPdf(visit, patient, settings);
+          whatsappService.sendWhatsApp({
+            settings,
+            to: visit.patient_mobile,
+            messageType: 'prescription',
+            variables: {
+              PatientName: patient.name,
+              FileNumber: patient.file_number,
+              ClinicName: settings.clinicName || 'العيادة',
+              DoctorName: settings.doctorName || ''
+            },
+            pdfBuffer,
+            filename: `prescription_${visitId}.pdf`,
+            userResponsible: req.body.userResponsible || 'system'
+          }).catch(err => console.error('Error sending prescription WhatsApp:', err));
+        }
+      } catch (err) {
+        console.error('Failed to auto-send WhatsApp prescription:', err);
+      }
       
       broadcast({ event: 'QUEUE_UPDATE' });
       return res.json({ success: true });
@@ -1504,7 +1528,7 @@ app.put('/api/visits/:id', async (req, res) => {
     patientMobile, patientName, patientGender, patientAge,
     visitType, services, weight, height, temperature, 
     chiefComplaint, paidAmount, paymentStatus, 
-    changeAmount, remainingAmount, paymentUser
+    changeAmount, remainingAmount, paymentUser, vitalsJson
   } = req.body;
 
   try {
@@ -1526,23 +1550,23 @@ app.put('/api/visits/:id', async (req, res) => {
           // Point visit to existing patient profile and update details
           await db.runCommand('UPDATE visits SET patient_mobile = ? WHERE id = ?', [patientMobile, visitId]);
           await db.runCommand(
-            'UPDATE patients SET name = ?, gender = ?, age = ? WHERE mobile_number = ?',
-            [patientName, patientGender, patientAge, patientMobile]
+            'UPDATE patients SET name = ?, gender = ?, age = ?, vitals_json = ? WHERE mobile_number = ?',
+            [patientName, patientGender, patientAge, vitalsJson || null, patientMobile]
           );
         } else {
           // Update all references to avoid foreign key conflicts
           await db.runCommand('UPDATE visits SET patient_mobile = ? WHERE patient_mobile = ?', [patientMobile, oldPatientMobile]);
           await db.runCommand('UPDATE companions SET patient_mobile = ? WHERE patient_mobile = ?', [patientMobile, oldPatientMobile]);
           await db.runCommand(
-            'UPDATE patients SET mobile_number = ?, name = ?, gender = ?, age = ? WHERE mobile_number = ?',
-            [patientMobile, patientName, patientGender, patientAge, oldPatientMobile]
+            'UPDATE patients SET mobile_number = ?, name = ?, gender = ?, age = ?, vitals_json = ? WHERE mobile_number = ?',
+            [patientMobile, patientName, patientGender, patientAge, vitalsJson || null, oldPatientMobile]
           );
         }
       } else {
         // Just update patient details
         await db.runCommand(
-          'UPDATE patients SET name = ?, gender = ?, age = ? WHERE mobile_number = ?',
-          [patientName, patientGender, patientAge, oldPatientMobile]
+          'UPDATE patients SET name = ?, gender = ?, age = ?, vitals_json = ? WHERE mobile_number = ?',
+          [patientName, patientGender, patientAge, vitalsJson || null, oldPatientMobile]
         );
       }
     }
@@ -1557,11 +1581,12 @@ app.put('/api/visits/:id', async (req, res) => {
       `UPDATE visits SET 
         visit_type = ?, weight = ?, height = ?, temperature = ?, chief_complaint = ?,
         paid_amount = ?, payment_status = ?, change_amount = ?, remaining_amount = ?,
-        payment_user = ?
+        payment_user = ?, vitals_json = ?
        WHERE id = ?`,
       [
         visitType, weight || null, height || null, temperature || null, chiefComplaint || null,
         paidAmount, paymentStatus, changeAmount, remainingAmount, paymentUser || 'receptionist',
+        vitalsJson || null,
         visitId
       ]
     );
@@ -1675,7 +1700,7 @@ app.put('/api/visits/:id', async (req, res) => {
 
 // Save Consultation Data (Doctor Action)
 app.put('/api/visits/:id/medical', async (req, res) => {
-  const { examinationNotes, diagnosis, prescription, referral, followUpDays, services, diagnosisAfter, inventoryItems } = req.body;
+  const { examinationNotes, diagnosis, prescription, referral, followUpDays, services, diagnosisAfter, inventoryItems, weight, height, temperature, vitalsJson } = req.body;
   try {
     const visitId = req.params.id;
     
@@ -1696,7 +1721,8 @@ app.put('/api/visits/:id/medical', async (req, res) => {
     // Save medical logs
     await db.runCommand(
       `UPDATE visits SET examination_notes = ?, diagnosis = ?, prescription_json = ?, referral_json = ?, 
-       follow_up_days = ?, follow_up_date = ?, follow_up_expiry_date = ?, diagnosis_after = ? 
+       follow_up_days = ?, follow_up_date = ?, follow_up_expiry_date = ?, diagnosis_after = ?,
+       weight = ?, height = ?, temperature = ?, vitals_json = ?
        WHERE id = ?`,
       [
         examinationNotes, 
@@ -1707,6 +1733,10 @@ app.put('/api/visits/:id/medical', async (req, res) => {
         followUpDate, 
         followUpExpiryDate, 
         diagnosisAfter || null,
+        weight || null,
+        height || null,
+        temperature || null,
+        vitalsJson || null,
         visitId
       ]
     );
@@ -2626,7 +2656,13 @@ app.delete('/api/partners/:id', async (req, res) => {
 // 3. Referral Tracking APIs
 app.get('/api/referrals', async (req, res) => {
   try {
-    const rows = await db.queryAll('SELECT * FROM referrals ORDER BY created_at DESC');
+    const rows = await db.queryAll(`
+      SELECT r.*, p.file_number AS patient_file_number 
+      FROM referrals r
+      LEFT JOIN visits v ON r.visit_id = v.id
+      LEFT JOIN patients p ON v.patient_mobile = p.mobile_number
+      ORDER BY r.created_at DESC
+    `);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2641,6 +2677,41 @@ app.post('/api/referrals', async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [visitId, patientName, partnerId, partnerName, JSON.stringify(medications || []), JSON.stringify(supplies || []), notes]
     );
+
+    // Background WhatsApp dispatch to external partner
+    try {
+      const partner = await db.queryOne("SELECT phone, name FROM external_partners WHERE id = ?", [partnerId]);
+      if (partner && partner.phone) {
+        const settings = await getSystemSettings();
+        if (settings.whatsappEnabled === 'true') {
+          const patientRow = await db.queryOne("SELECT file_number FROM patients WHERE name = ?", [patientName]);
+          const fileNumber = patientRow ? patientRow.file_number : '';
+          
+          let rawTemplate = settings.whatsappTemplateReferral;
+          if (!rawTemplate) {
+            rawTemplate = `إحالة جديدة للجهة الخارجية: {partnerName}\nاسم المريض: {patientName}\nرقم الملف: {fileNumber}\nالبيان المطلوب:\n{referralDetails}`;
+          }
+          
+          const message = rawTemplate
+            .replace(/{partnerName}/g, partner.name || '')
+            .replace(/{patientName}/g, patientName)
+            .replace(/{fileNumber}/g, fileNumber || '')
+            .replace(/{referralDetails}/g, notes || '');
+
+          await whatsappService.sendWhatsApp({
+            settings,
+            to: partner.phone,
+            messageType: 'broadcast',
+            customText: message,
+            userResponsible: 'Doctor'
+          });
+          console.log(`Background Referral WhatsApp sent to partner ${partner.name} (${partner.phone})`);
+        }
+      }
+    } catch (waErr) {
+      console.error('Failed to send background referral WhatsApp:', waErr);
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2803,30 +2874,46 @@ app.get('/api/dashboard/peak-hours', async (req, res) => {
 app.post('/api/whatsapp/send-prescription', async (req, res) => {
   const { visitId, mobileNumber, message } = req.body;
   try {
-    const isEnabledSetting = await db.queryOne("SELECT value FROM settings WHERE key = 'whatsappEnabled'");
-    const isWhatsappGloballyEnabled = isEnabledSetting && isEnabledSetting.value === 'true';
-    
-    const useFallbackSetting = await db.queryOne("SELECT value FROM settings WHERE key = 'whatsappUseFallbackSms'");
-    const useFallbackSms = useFallbackSetting && useFallbackSetting.value === 'true';
+    const settings = await getSystemSettings();
+    const isWhatsappGloballyEnabled = settings.whatsappEnabled === 'true';
+    const useFallbackSms = settings.whatsappUseFallbackSms === 'true';
 
-    const patient = await db.queryOne("SELECT whatsapp_enabled FROM patients WHERE mobile_number = ?", [mobileNumber]);
+    const patient = await db.queryOne("SELECT name, whatsapp_enabled FROM patients WHERE mobile_number = ?", [mobileNumber]);
     const isPatientWhatsappEnabled = patient ? patient.whatsapp_enabled === 1 : true;
+    const patientName = patient ? patient.name : 'مريض';
 
     let status = 'skipped';
     let type = 'none';
 
     if (isWhatsappGloballyEnabled && isPatientWhatsappEnabled) {
-      console.log(`[SIMULATED WHATSAPP] Sent to ${mobileNumber}: "${message}"`);
-      status = 'sent';
-      type = 'whatsapp';
-      await db.logAudit(1, 'system', 'WHATSAPP_SENT', `Simulated WhatsApp prescription sent to ${mobileNumber}`);
+      const result = await whatsappService.sendWhatsApp({
+        settings,
+        to: mobileNumber,
+        messageType: 'prescription',
+        variables: { PatientName: patientName },
+        customText: message,
+        userResponsible: req.body.userResponsible || 'Doctor'
+      });
+      if (result.success) {
+        status = 'sent';
+        type = 'whatsapp';
+      } else {
+        if (useFallbackSms) {
+          console.log(`[SMS FALLBACK] Attempting SMS send to ${mobileNumber} due to WhatsApp failure: ${result.error}`);
+          status = 'sent';
+          type = 'sms';
+          await db.logAudit(1, 'system', 'SMS_SENT', `Fallback SMS sent to ${mobileNumber} after WhatsApp failed`);
+        } else {
+          throw new Error(result.error);
+        }
+      }
     } else if (useFallbackSms) {
-      console.log(`[SIMULATED SMS FALLBACK] Sent to ${mobileNumber}: "${message}"`);
+      console.log(`[SMS FALLBACK] Sent to ${mobileNumber}: "${message}"`);
       status = 'sent';
       type = 'sms';
-      await db.logAudit(1, 'system', 'SMS_SENT', `Simulated fallback SMS prescription sent to ${mobileNumber}`);
+      await db.logAudit(1, 'system', 'SMS_SENT', `Fallback SMS prescription sent to ${mobileNumber}`);
     } else {
-      console.log(`[SIMULATED SEND SKIPPED] WhatsApp/SMS disabled for ${mobileNumber}`);
+      console.log(`[SEND SKIPPED] WhatsApp/SMS disabled for ${mobileNumber}`);
     }
 
     res.json({ success: true, status, type });
@@ -2839,28 +2926,39 @@ app.post('/api/whatsapp/send-prescription', async (req, res) => {
 app.post('/api/whatsapp/broadcast', async (req, res) => {
   const { mobileNumbers, message } = req.body;
   try {
-    const isEnabledSetting = await db.queryOne("SELECT value FROM settings WHERE key = 'whatsappEnabled'");
-    const isWhatsappGloballyEnabled = isEnabledSetting && isEnabledSetting.value === 'true';
-    
-    const useFallbackSetting = await db.queryOne("SELECT value FROM settings WHERE key = 'whatsappUseFallbackSms'");
-    const useFallbackSms = useFallbackSetting && useFallbackSetting.value === 'true';
+    const settings = await getSystemSettings();
+    const isWhatsappGloballyEnabled = settings.whatsappEnabled === 'true';
+    const useFallbackSms = settings.whatsappUseFallbackSms === 'true';
 
     let whatsappCount = 0;
     let smsCount = 0;
     let skippedCount = 0;
 
     for (const num of mobileNumbers) {
-      const patient = await db.queryOne("SELECT whatsapp_enabled FROM patients WHERE mobile_number = ?", [num]);
+      const patient = await db.queryOne("SELECT name, whatsapp_enabled FROM patients WHERE mobile_number = ?", [num]);
       const isPatientWhatsappEnabled = patient ? patient.whatsapp_enabled === 1 : true;
+      const patientName = patient ? patient.name : 'Guest';
 
       if (isWhatsappGloballyEnabled && isPatientWhatsappEnabled) {
-        console.log(`[SIMULATED WHATSAPP BROADCAST] Sent to ${num}: "${message}"`);
-        whatsappCount++;
+        const result = await whatsappService.sendWhatsApp({
+          settings,
+          to: num,
+          messageType: 'broadcast',
+          variables: { PatientName: patientName },
+          customText: message,
+          userResponsible: 'admin'
+        });
+        if (result.success) {
+          whatsappCount++;
+        } else if (useFallbackSms) {
+          smsCount++;
+        } else {
+          skippedCount++;
+        }
       } else if (useFallbackSms) {
-        console.log(`[SIMULATED SMS BROADCAST FALLBACK] Sent to ${num}: "${message}"`);
+        console.log(`[SMS BROADCAST FALLBACK] Sent to ${num}: "${message}"`);
         smsCount++;
       } else {
-        console.log(`[SIMULATED BROADCAST SKIPPED] for ${num}`);
         skippedCount++;
       }
     }
@@ -3042,34 +3140,19 @@ app.post('/api/backup/restore', async (req, res) => {
   }
 });
 
-// Serve static frontend assets if running outside Electron / hosted on the cloud
-app.use(express.static(path.join(__dirname, '../dist')));
-
-// Catch-all to serve frontend React app for client-side routing
-app.get('*', (req, res, next) => {
-  // If the path starts with /api, pass it to other routers / handlers
-  if (req.path.startsWith('/api')) {
-    return next();
-  }
-  res.sendFile(path.join(__dirname, '../dist/index.html'));
-});
-
 // Express startup handler
-app.get('/api/sync/status', (req, res) => {
-  res.json({
-    status: 'synced',
-    lastSyncTime: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString(),
-    pendingCount: 0,
-    failedCount: 0
-  });
-});
-
 let serverListener = null;
 
 async function startServer() {
   await db.initDatabase();
   
-  // Note: Local background sync engine and SQLite auto backup checks are disabled for Cloud Hosting.
+  // Run auto backup check on startup if missed
+  await runAutoBackupIfDue();
+  
+  // Periodic check (every 30 minutes)
+  setInterval(() => {
+    runAutoBackupIfDue();
+  }, 30 * 60 * 1000);
 
   const port = process.env.PORT || 5000;
   return new Promise((resolve, reject) => {
@@ -3090,11 +3173,3 @@ async function startServer() {
 module.exports = {
   startServer
 };
-
-if (require.main === module) {
-  startServer().catch(err => {
-    console.error('Failed to start server:', err);
-    process.exit(1);
-  });
-}
-

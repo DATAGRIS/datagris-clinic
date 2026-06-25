@@ -82,17 +82,12 @@ export async function POST(req: NextRequest) {
     }
 
     const clinicId = parts[0];
-    const plan = parts[1]; // monthly, annual
+    const plan = parts[1]; // basic, pro
 
-    // 4. Calculate subscription dates
+    // 4. Calculate subscription dates (both Basic and Pro are annual plans)
     const startDate = new Date();
     const endDate = new Date();
-
-    if (plan === 'annual') {
-      endDate.setDate(startDate.getDate() + 365); // 1 Year
-    } else {
-      endDate.setDate(startDate.getDate() + 30); // 30 Days (monthly)
-    }
+    endDate.setDate(startDate.getDate() + 365); // 1 Year (365 days)
 
     // 5. Update clinic subscription in database
     await executeQueryAsAdmin(

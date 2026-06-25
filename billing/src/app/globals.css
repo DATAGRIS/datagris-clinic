@@ -369,3 +369,132 @@ body {
 .justify-center {
   justify-content: center;
 }
+
+/* Premium Split Layout for Checkout */
+.checkout-split-layout {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+@media (max-width: 968px) {
+  .checkout-split-layout {
+    flex-direction: column;
+  }
+}
+
+.checkout-visual-panel {
+  width: 50%;
+  position: relative;
+  background-image: 
+    linear-gradient(135deg, rgba(11, 15, 25, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%),
+    url('https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?q=80&w=1000');
+  background-size: cover;
+  background-position: center;
+  padding: 60px 80px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-right: 1px solid var(--border-color);
+}
+
+@media (max-width: 968px) {
+  .checkout-visual-panel {
+    width: 100%;
+    padding: 40px 20px;
+  }
+}
+
+.visual-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle at 30% 30%, rgba(99, 102, 241, 0.15) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.visual-content {
+  position: relative;
+  z-index: 10;
+}
+
+.features-showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+  margin-top: 20px;
+}
+
+@media (max-width: 520px) {
+  .features-showcase-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.showcase-item {
+  display: flex;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(8px);
+}
+
+.showcase-item .icon-wrapper {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.showcase-item h4 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.showcase-item p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.checkout-form-panel {
+  width: 50%;
+  background: var(--bg-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 40px;
+}
+
+@media (max-width: 968px) {
+  .checkout-form-panel {
+    width: 100%;
+    padding: 40px 20px;
+  }
+}
+
+.checkout-error-banner {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid var(--accent-red);
+  color: #f87171;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+.checkout-success-banner {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid var(--accent-green);
+  color: #4ade80;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  text-align: right;
+}

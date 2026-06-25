@@ -46,11 +46,6 @@ const defaultConfig = {
   serverPort: 5000,
   dbType: 'sqlite', // 'sqlite' or 'mysql'
   theme: 'dark',
-  clinicId: '',
-  subscriptionStatus: 'active',
-  subscriptionLastChecked: '',
-  subscriptionOfflineGraceDays: 5,
-  billingUrl: 'https://billing.datagris.com',
   mysqlConfig: {
     host: 'localhost',
     port: 3306,
@@ -92,7 +87,6 @@ async function startBackendServer(config) {
       process.env.USER_DATA_PATH = app.getPath('userData');
       process.env.PORT = config.serverPort || 5000;
       process.env.DB_TYPE = config.dbType;
-      process.env.CLINIC_ID = config.clinicId;
       
       if (config.dbType === 'mysql') {
         process.env.MYSQL_HOST = config.mysqlConfig.host;
@@ -118,26 +112,7 @@ async function startBackendServer(config) {
   }
 }
 
-async function checkSubscription(clinicId) {
-  try {
-    const config = readConfig();
-    const billingUrl = config.billingUrl || 'https://billing.datagris.com';
-    const res = await fetch(`${billingUrl}/api/subscription/check?clinic_id=${clinicId}`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    if (!res.ok) {
-      throw new Error(`Server returned status: ${res.status}`);
-    }
-    const data = await res.json();
-    return { active: data.status === 'active', status: data.status };
-  } catch (err) {
-    console.error('Subscription check online error:', err);
-    throw err;
-  }
-}
-
-async function createWindow() {
+function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -153,55 +128,12 @@ async function createWindow() {
   // Remove default menu for clinical app feel
   mainWindow.removeMenu();
 
-  const config = readConfig();
-  let subActive = true;
-
-  if (config.clinicId) {
-    try {
-      const check = await checkSubscription(config.clinicId);
-      subActive = check.active;
-      config.subscriptionStatus = check.status || (subActive ? 'active' : 'expired');
-      config.subscriptionLastChecked = new Date().toISOString();
-      writeConfig(config);
-    } catch (e) {
-      console.error('Offline or failed checking subscription. Relying on local cached status and grace period...');
-      if (config.subscriptionStatus === 'expired') {
-        subActive = false;
-      } else {
-        const lastCheckedStr = config.subscriptionLastChecked;
-        if (!lastCheckedStr) {
-          config.subscriptionLastChecked = new Date().toISOString();
-          config.subscriptionStatus = 'active';
-          writeConfig(config);
-          subActive = true;
-        } else {
-          const lastCheckedDate = new Date(lastCheckedStr);
-          const diffMs = Math.abs(new Date().getTime() - lastCheckedDate.getTime());
-          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-          const graceDays = config.subscriptionOfflineGraceDays || 5;
-          
-          if (diffDays > graceDays) {
-            console.log(`Grace period exceeded (${diffDays} days since last check). Locking app.`);
-            subActive = false;
-          } else {
-            console.log(`Running in offline mode. Grace period valid: ${diffDays}/${graceDays} days since last check.`);
-            subActive = true;
-          }
-        }
-      }
-    }
-  }
-
   const isDev = !app.isPackaged;
-  if (!subActive) {
-    mainWindow.loadFile(path.join(__dirname, 'lock.html'), {
-      query: { clinic_id: config.clinicId }
-    });
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:3000');
+    mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
-    if (isDev) {
-      mainWindow.webContents.openDevTools();
-    }
   }
 
   mainWindow.on('closed', () => {

@@ -13,10 +13,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing checkout parameters' }, { status: 400 });
     }
 
-    // Determine pricing plan
-    let amountCents = 49900; // Monthly: 499.00 EGP
-    if (plan === 'annual') {
-      amountCents = 499000; // Annual: 4,990.00 EGP
+    // Determine pricing plan (Basic: 3000 EGP, Pro: 5000 EGP)
+    let amountCents = 300000; // Default Basic: 3,000.00 EGP
+    if (plan === 'pro') {
+      amountCents = 500000; // Pro: 5,000.00 EGP
     }
 
     // 1. Authenticate with Paymob to get auth_token
