@@ -104,10 +104,20 @@ async function getSystemSettings() {
       settings[r.key] = val;
     });
 
-    // Also load WhatsApp API key and provider from subscriptions table if available
+    // Also load WhatsApp API key, provider, plan, and end date from subscriptions table if available
     try {
-      const sub = await db.queryOne('SELECT whatsapp_api_key, whatsapp_provider FROM subscriptions LIMIT 1');
+      const sub = await db.queryOne('SELECT plan, status, subscription_start_date, subscription_end_date, whatsapp_api_key, whatsapp_provider FROM subscriptions LIMIT 1');
       if (sub) {
+        // Override dynamic subscription settings from subscriptions table
+        settings['subscriptionPlan'] = sub.plan || 'trial';
+        settings['subscriptionStatus'] = sub.status || 'trial';
+        if (sub.subscription_start_date) {
+          settings['subscriptionStartDate'] = new Date(sub.subscription_start_date).toISOString();
+        }
+        if (sub.subscription_end_date) {
+          settings['subscriptionEndDate'] = new Date(sub.subscription_end_date).toISOString();
+        }
+        
         if (sub.whatsapp_api_key) {
           settings['whatsappAccessToken'] = secureCrypto.decrypt(sub.whatsapp_api_key);
         }
@@ -3120,7 +3130,6 @@ app.post('/api/whatsapp/send-prescription', async (req, res) => {
   try {
     const settings = await getSystemSettings();
     const isWhatsappGloballyEnabled = settings.whatsappEnabled === 'true';
-    const useFallbackSms = settings.whatsappUseFallbackSms === 'true';
 
     const patient = await db.queryOne("SELECT name, whatsapp_enabled FROM patients WHERE mobile_number = ?", [mobileNumber]);
     const isPatientWhatsappEnabled = patient ? patient.whatsapp_enabled === 1 : true;
@@ -3142,22 +3151,10 @@ app.post('/api/whatsapp/send-prescription', async (req, res) => {
         status = 'sent';
         type = 'whatsapp';
       } else {
-        if (useFallbackSms) {
-          console.log(`[SMS FALLBACK] Attempting SMS send to ${mobileNumber} due to WhatsApp failure: ${result.error}`);
-          status = 'sent';
-          type = 'sms';
-          await db.logAudit(1, 'system', 'SMS_SENT', `Fallback SMS sent to ${mobileNumber} after WhatsApp failed`);
-        } else {
-          throw new Error(result.error);
-        }
+        throw new Error(result.error);
       }
-    } else if (useFallbackSms) {
-      console.log(`[SMS FALLBACK] Sent to ${mobileNumber}: "${message}"`);
-      status = 'sent';
-      type = 'sms';
-      await db.logAudit(1, 'system', 'SMS_SENT', `Fallback SMS prescription sent to ${mobileNumber}`);
     } else {
-      console.log(`[SEND SKIPPED] WhatsApp/SMS disabled for ${mobileNumber}`);
+      console.log(`[SEND SKIPPED] WhatsApp disabled for ${mobileNumber}`);
     }
 
     res.json({ success: true, status, type });
@@ -3172,10 +3169,8 @@ app.post('/api/whatsapp/broadcast', async (req, res) => {
   try {
     const settings = await getSystemSettings();
     const isWhatsappGloballyEnabled = settings.whatsappEnabled === 'true';
-    const useFallbackSms = settings.whatsappUseFallbackSms === 'true';
 
     let whatsappCount = 0;
-    let smsCount = 0;
     let skippedCount = 0;
 
     for (const num of mobileNumbers) {
@@ -3194,24 +3189,19 @@ app.post('/api/whatsapp/broadcast', async (req, res) => {
         });
         if (result.success) {
           whatsappCount++;
-        } else if (useFallbackSms) {
-          smsCount++;
         } else {
           skippedCount++;
         }
-      } else if (useFallbackSms) {
-        console.log(`[SMS BROADCAST FALLBACK] Sent to ${num}: "${message}"`);
-        smsCount++;
       } else {
         skippedCount++;
       }
     }
 
-    await db.logAudit(1, 'system', 'WHATSAPP_BROADCAST', `Broadcast complete. WhatsApp: ${whatsappCount}, SMS: ${smsCount}, Skipped: ${skippedCount}`);
+    await db.logAudit(1, 'system', 'WHATSAPP_BROADCAST', `Broadcast complete. WhatsApp: ${whatsappCount}, Skipped: ${skippedCount}`);
     res.json({
       success: true,
       whatsappCount,
-      smsCount,
+      smsCount: 0,
       skippedCount
     });
   } catch (err) {
