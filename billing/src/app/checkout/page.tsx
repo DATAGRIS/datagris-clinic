@@ -141,10 +141,8 @@ function CheckoutContent() {
         }
 
         const data = await res.json();
-        
-        setSuccessMessage(plan === 'pro' ? t.proSuccessMsg : t.basicSuccessMsg);
-        setNextUrl(data.url);
-        setShowSuccessModal(true);
+        // Redirect directly to Paymob payment link
+        window.location.href = data.url;
       } else {
         // Registration flow for new clinic
         const regRes = await fetch('/api/auth/register', {
@@ -456,6 +454,8 @@ function CheckoutContent() {
             >
               {loading
                 ? t.submitLoading
+                : isExisting
+                ? (lang === 'ar' ? 'المتابعة للدفع والتفعيل' : 'Proceed to Payment & Activate')
                 : plan === 'trial'
                 ? t.submitTrial
                 : t.submitPaid}

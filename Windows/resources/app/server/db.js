@@ -1232,5 +1232,7 @@ module.exports = {
   logAudit,
   getDbType: () => dbType,
   getDbPath: () => dbPath,
-  runWithUser
+  runWithUser,
+  getRequestUserId,
+  getClinicUserId: () => clinicUserId
 };

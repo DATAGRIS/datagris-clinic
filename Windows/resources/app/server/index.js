@@ -113,8 +113,23 @@ async function getSystemSettings() {
     });
 
     // Also load WhatsApp API key, provider, plan, and end date from subscriptions table if available
-    try {
-      const sub = await db.queryOne('SELECT plan, status, subscription_start_date, subscription_end_date, whatsapp_api_key, whatsapp_provider FROM subscriptions LIMIT 1');
+      const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+      let subQuery = 'SELECT plan, status, subscription_start_date, subscription_end_date, whatsapp_api_key, whatsapp_provider FROM subscriptions LIMIT 1';
+      let queryParams = [];
+      if (isPostgres) {
+        const activeUserId = db.getRequestUserId() || db.getClinicUserId();
+        if (activeUserId) {
+          subQuery = `
+            SELECT s.plan, s.status, s.subscription_start_date, s.subscription_end_date, s.whatsapp_api_key, s.whatsapp_provider 
+            FROM subscriptions s
+            JOIN profiles p ON s.clinic_id = p.clinic_id
+            WHERE p.id = ?
+            LIMIT 1
+          `;
+          queryParams = [activeUserId];
+        }
+      }
+      const sub = await db.queryOne(subQuery, queryParams);
       if (sub) {
         // Override dynamic subscription settings from subscriptions table
         settings['subscriptionPlan'] = sub.plan || 'trial';
