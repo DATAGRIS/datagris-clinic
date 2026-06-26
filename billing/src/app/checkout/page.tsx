@@ -121,17 +121,23 @@ function CheckoutContent() {
     try {
       if (isExisting) {
         // Upgrade flow for existing clinic
-        if (!clinicId) {
-          throw new Error(lang === 'ar' ? 'يرجى إدخال معرف العيادة' : 'Please enter Clinic ID');
+        if (!username) {
+          throw new Error(lang === 'ar' ? 'يرجى إدخال اسم المستخدم' : 'Please enter Username');
+        }
+        if (!password) {
+          throw new Error(lang === 'ar' ? 'يرجى إدخال كلمة المرور' : 'Please enter Password');
+        }
+        if (!mobile) {
+          throw new Error(lang === 'ar' ? 'يرجى إدخال رقم الهاتف' : 'Please enter Phone Number');
         }
         const res = await fetch('/api/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            clinicId: clinicId,
+            username: username,
+            password: password,
             plan: plan,
-            mobile: mobile || '01000000000',
-            email: `${clinicId}@datagris-checkout.com`
+            mobile: mobile
           })
         });
 
@@ -310,15 +316,29 @@ function CheckoutContent() {
             {isExisting ? (
               <>
                 <div className="form-group">
-                  <label style={{ fontFamily: 'var(--font-ar)' }}>{t.clinicIdLabel}</label>
+                  <label style={{ fontFamily: 'var(--font-ar)' }}>{t.usernameLabel}</label>
                   <input
                     type="text"
                     className="form-control"
                     required
-                    placeholder={t.clinicIdPlaceholder}
-                    value={clinicId}
-                    onChange={(e) => setClinicId(e.target.value)}
-                    disabled={loading || !!searchParams.get('clinic')}
+                    placeholder={t.usernamePlaceholder}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    disabled={loading}
+                    style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontFamily: 'var(--font-ar)' }}>{t.passwordLabel}</label>
+                  <input
+                    type="password"
+                    className="form-control"
+                    required
+                    placeholder={t.passwordPlaceholder}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={loading}
                     style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
                   />
                 </div>

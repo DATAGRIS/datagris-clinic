@@ -1,13 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
+import { createClient } from '@supabase/supabase-js';
 
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 const paymobApiKey = process.env.PAYMOB_API_KEY || '';
 const paymobIntegrationId = process.env.PAYMOB_INTEGRATION_ID || '';
 const paymobPublicKey = process.env.PAYMOB_PUBLIC_KEY || process.env.NEXT_PUBLIC_PAYMOB_PUBLIC_KEY || '';
 
 export async function POST(req: NextRequest) {
   try {
-    const { clinicId, plan, mobile, email } = await req.json();
+    const body = await req.json();
+    const { plan, mobile } = body;
+    let clinicId = body.clinicId;
+    let email = body.email;
+
+    // Upgrade/Renewal flow: authenticate user first and fetch clinic_id
+    if (!clinicId && body.username && body.password) {
+      const username = body.username.trim().toLowerCase();
+      const password = body.password;
+
+      const supabase = createClient(supabaseUrl, supabaseAnonKey);
+      const authEmail = `${username}@datagris-auth.com`;
+
+      // 1. Authenticate with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: authEmail,
+        password
+      });
+
+      if (authError || !authData.user) {
+        console.error('Checkout authentication error:', authError);
+        return NextResponse.json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' }, { status: 401 });
+      }
+
+      // 2. Fetch User Profile to get clinic_id
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('clinic_id')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (profileError || !profile) {
+        console.error('Checkout profile fetch error:', profileError);
+        return NextResponse.json({ error: 'لم يتم العثور على ملف تعريف المستخدم الخاص بك' }, { status: 404 });
+      }
+
+      clinicId = profile.clinic_id;
+      email = `${username}@datagris-checkout.com`;
+    }
 
     if (!clinicId || !plan || !mobile || !email) {
       return NextResponse.json({ error: 'Missing checkout parameters' }, { status: 400 });
