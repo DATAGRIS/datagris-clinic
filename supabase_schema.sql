@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS patients (
     whatsapp_enabled INT DEFAULT 1,
     parent_mobile VARCHAR(100),
     is_companion INT DEFAULT 0,
+    vitals_json TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     PRIMARY KEY (clinic_id, mobile_number)
 );
@@ -130,7 +131,9 @@ CREATE TABLE IF NOT EXISTS visits (
     payment_user VARCHAR(255),
     is_resumed INT DEFAULT 0,
     diagnosis_after TEXT,
-    inventory_deducted INT DEFAULT 0
+    inventory_deducted INT DEFAULT 0,
+    vitals_json TEXT,
+    followup_reminder_sent INT DEFAULT 0
 );
 
 -- 9. Services attached to Visits
