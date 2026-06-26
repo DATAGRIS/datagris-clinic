@@ -113,6 +113,7 @@ async function getSystemSettings() {
     });
 
     // Also load WhatsApp API key, provider, plan, and end date from subscriptions table if available
+    try {
       const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
       let subQuery = 'SELECT plan, status, subscription_start_date, subscription_end_date, whatsapp_api_key, whatsapp_provider FROM subscriptions LIMIT 1';
       let queryParams = [];

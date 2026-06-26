@@ -32,8 +32,7 @@ export default function ContactPage() {
       btnSending: 'جاري الإرسال...',
       successMsg: 'تم إرسال رسالتك بنجاح! شكراً لتواصلك معنا وسنتواصل معك قريباً.',
       errorMsg: 'حدث خطأ أثناء إرسال الرسالة. يرجى المحاولة مرة أخرى.',
-      supportEmail: 'البريد الإلكتروني للدعم: support@datagris.com',
-      salesPhone: 'هاتف المبيعات: 01001234567'
+      supportEmail: 'البريد الإلكتروني للدعم: support@datagris.com'
     },
     en: {
       title: 'Contact Us',
@@ -50,8 +49,7 @@ export default function ContactPage() {
       btnSending: 'Sending...',
       successMsg: 'Your message has been sent successfully! Thank you for contacting us, we will reply shortly.',
       errorMsg: 'An error occurred while sending your message. Please try again.',
-      supportEmail: 'Support Email: support@datagris.com',
-      salesPhone: 'Sales Phone: 01001234567'
+      supportEmail: 'Support Email: support@datagris.com'
     }
   }[lang];
 
@@ -190,8 +188,7 @@ export default function ContactPage() {
       </div>
 
       <div style={{ marginTop: '40px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-ar)' }}>
-        <p style={{ marginBottom: '8px' }}>{t.supportEmail}</p>
-        <p>{t.salesPhone}</p>
+        <p>{t.supportEmail}</p>
       </div>
     </div>
   );
