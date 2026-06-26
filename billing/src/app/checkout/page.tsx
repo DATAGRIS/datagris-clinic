@@ -22,17 +22,26 @@ function CheckoutContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Added states for existing account flow
+  const [isExisting, setIsExisting] = useState(!!existingClinicId);
+  const [clinicId, setClinicId] = useState(existingClinicId);
+
   // Success Modal State
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [nextUrl, setNextUrl] = useState('');
 
-  // Synchronize plan state when search param changes (e.g. clicking trial link in header)
+  // Synchronize plan and clinic ID state when search param changes
   useEffect(() => {
     const p = searchParams.get('plan');
     if (p) {
       setPlan(p);
       setError('');
+    }
+    const c = searchParams.get('clinic');
+    if (c) {
+      setClinicId(c);
+      setIsExisting(true);
     }
   }, [searchParams]);
 
@@ -43,8 +52,8 @@ function CheckoutContent() {
       upgradeTitle: 'تجديد وترقية الاشتراك',
       selectPlan: 'اختر الخطة المطلوبة',
       selectPlanTrial: 'باقة تجريبية - 7 أيام مجاناً (0 ج.م)',
-      selectPlanBasic: 'الباقة الأساسية - سنوي (3,000 ج.م)',
-      selectPlanPro: 'الباقة الاحترافية - سنوي (5,000 ج.م)',
+      selectPlanBasic: 'الباقة الأساسية - شهري (3,000 ج.م)',
+      selectPlanPro: 'الباقة الاحترافية - شهري (5,000 ج.م)',
       clinicLabel: 'اسم العيادة',
       clinicPlaceholder: 'مثال: عيادة داتا جريس الطبية',
       doctorLabel: 'اسم الطبيب بالكامل',
@@ -57,22 +66,26 @@ function CheckoutContent() {
       passwordPlaceholder: '••••••••',
       submitLoading: 'جاري معالجة طلبك...',
       submitTrial: 'إنشاء حساب تجريبي مجاني',
-      submitPaid: 'إنشاء الحساب والمتابعة للدفع',
+      submitPaid: 'تأكيد الاشتراك والمتابعة للدفع',
       errorHeading: 'حدث خطأ',
       successHeading: 'تم بنجاح',
       proSuccessMsg: 'تم إرسال طلب تفعيل الواتساب بنجاح لشركة DATAGRIS! يرجى الانتظار من 1 إلى 3 أيام عمل لتفعيل الخدمة. اضغط التالي لإتمام عملية الدفع.',
       basicSuccessMsg: 'تم إنشاء طلب الحساب بنجاح! اضغط التالي لإتمام عملية الدفع.',
       trialSuccessMsg: 'تم إنشاء الحساب التجريبي بنجاح! سيتم تحويلك الآن لتسجيل الدخول.',
       nextBtn: 'التالي',
-      loginBtn: 'تسجيل الدخول'
+      loginBtn: 'تسجيل الدخول',
+      clinicIdLabel: 'معرف العيادة (Clinic ID)',
+      clinicIdPlaceholder: 'مثال: CLN-000001',
+      existingAccountLink: 'هل لديك عيادة بالفعل؟ اضغط هنا للترقية أو التجديد',
+      newAccountLink: 'تسجيل عيادة جديدة'
     },
     en: {
       registerTitle: 'Register New Clinic',
       upgradeTitle: 'Upgrade & Renew Subscription',
       selectPlan: 'Select Desired Plan',
       selectPlanTrial: '7-Day Free Trial (0 EGP)',
-      selectPlanBasic: 'Basic Plan - Annual (3,000 EGP)',
-      selectPlanPro: 'Pro Plan - Annual (5,000 EGP)',
+      selectPlanBasic: 'Basic Plan - Monthly (3,000 EGP)',
+      selectPlanPro: 'Pro Plan - Monthly (5,000 EGP)',
       clinicLabel: 'Clinic Name',
       clinicPlaceholder: 'e.g., Datagris Medical Clinic',
       doctorLabel: "Doctor's Full Name",
@@ -85,14 +98,18 @@ function CheckoutContent() {
       passwordPlaceholder: '••••••••',
       submitLoading: 'Processing your request...',
       submitTrial: 'Create Free Trial Account',
-      submitPaid: 'Create Account & Proceed to Payment',
+      submitPaid: 'Confirm Subscription & Proceed to Payment',
       errorHeading: 'An error occurred',
       successHeading: 'Success',
       proSuccessMsg: 'WhatsApp activation request successfully sent to DATAGRIS! Please allow 1-3 business days to activate the service. Click Next to proceed to payment.',
       basicSuccessMsg: 'Account request created successfully! Click Next to proceed to payment.',
       trialSuccessMsg: 'Trial account created successfully! Redirecting you to the login page.',
       nextBtn: 'Next',
-      loginBtn: 'Login'
+      loginBtn: 'Login',
+      clinicIdLabel: 'Clinic ID',
+      clinicIdPlaceholder: 'e.g., CLN-000001',
+      existingAccountLink: 'Already have a clinic? Renew or upgrade here',
+      newAccountLink: 'Register a new clinic'
     }
   }[lang];
 
@@ -102,16 +119,19 @@ function CheckoutContent() {
     setError('');
 
     try {
-      if (existingClinicId) {
+      if (isExisting) {
         // Upgrade flow for existing clinic
+        if (!clinicId) {
+          throw new Error(lang === 'ar' ? 'يرجى إدخال معرف العيادة' : 'Please enter Clinic ID');
+        }
         const res = await fetch('/api/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            clinicId: existingClinicId,
+            clinicId: clinicId,
             plan: plan,
             mobile: mobile || '01000000000',
-            email: `${existingClinicId}@datagris-checkout.com`
+            email: `${clinicId}@datagris-checkout.com`
           })
         });
 
@@ -122,7 +142,6 @@ function CheckoutContent() {
 
         const data = await res.json();
         
-        // Exclude trial check for existing upgrade, directly show modal or redirect
         setSuccessMessage(plan === 'pro' ? t.proSuccessMsg : t.basicSuccessMsg);
         setNextUrl(data.url);
         setShowSuccessModal(true);
@@ -211,12 +230,55 @@ function CheckoutContent() {
     window.location.href = nextUrl;
   };
 
+  // Render a clean centered success screen instead of a side modal popup
+  if (showSuccessModal) {
+    return (
+      <div style={{ display: 'flex', minHeight: '100vh', width: '100%', background: 'var(--bg-app)', alignItems: 'center', justifyContent: 'center', padding: '40px 20px' }}>
+        <div className="form-card" style={{ maxWidth: '560px', width: '100%', background: 'var(--bg-card)', padding: '48px 36px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', boxShadow: '0 10px 30px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+          <div style={{ fontSize: '4.5rem', marginBottom: '24px', animation: 'scaleUp 0.5s ease-out' }}>
+            {plan === 'trial' ? '🎉' : '💳'}
+          </div>
+          
+          <h1 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '16px', fontFamily: 'var(--font-ar)' }}>
+            {t.successHeading}
+          </h1>
+          
+          <p style={{ fontSize: '1.1rem', color: 'var(--text-muted)', lineHeight: 1.7, marginBottom: '32px', fontFamily: 'var(--font-ar)' }}>
+            {successMessage}
+          </p>
+          
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <button 
+              onClick={handleModalNext}
+              className="form-submit"
+              style={{
+                padding: '14px 32px',
+                borderRadius: '8px',
+                fontSize: '1.1rem',
+                fontWeight: 600,
+                backgroundColor: 'var(--primary)',
+                fontFamily: 'var(--font-ar)',
+                border: 'none',
+                color: '#fff',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 4px 12px rgba(var(--primary-rgb), 0.25)'
+              }}
+            >
+              {plan === 'trial' ? t.loginBtn : t.nextBtn}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', width: '100%', background: 'var(--bg-app)', alignItems: 'center', justifyContent: 'center', padding: '40px 20px' }}>
       <div style={{ maxWidth: '560px', width: '100%' }}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-main)', fontFamily: 'var(--font-ar)', marginBottom: '8px' }}>
-            {existingClinicId ? t.upgradeTitle : t.registerTitle}
+            {isExisting ? t.upgradeTitle : t.registerTitle}
           </h1>
         </div>
 
@@ -241,26 +303,42 @@ function CheckoutContent() {
                 disabled={loading || !!searchParams.get('plan')}
                 style={{ height: '46px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
               >
-                {!existingClinicId && <option value="trial">{t.selectPlanTrial}</option>}
+                {!isExisting && <option value="trial">{t.selectPlanTrial}</option>}
                 <option value="basic">{t.selectPlanBasic}</option>
                 <option value="pro">{t.selectPlanPro}</option>
               </select>
             </div>
 
-            {existingClinicId ? (
-              <div className="form-group">
-                <label style={{ fontFamily: 'var(--font-ar)' }}>{t.phoneLabel}</label>
-                <input
-                  type="tel"
-                  className="form-control"
-                  required
-                  placeholder={t.phonePlaceholder}
-                  value={mobile}
-                  onChange={(e) => setMobile(e.target.value)}
-                  disabled={loading}
-                  style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
-                />
-              </div>
+            {isExisting ? (
+              <>
+                <div className="form-group">
+                  <label style={{ fontFamily: 'var(--font-ar)' }}>{t.clinicIdLabel}</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    required
+                    placeholder={t.clinicIdPlaceholder}
+                    value={clinicId}
+                    onChange={(e) => setClinicId(e.target.value)}
+                    disabled={loading || !!searchParams.get('clinic')}
+                    style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontFamily: 'var(--font-ar)' }}>{t.phoneLabel}</label>
+                  <input
+                    type="tel"
+                    className="form-control"
+                    required
+                    placeholder={t.phonePlaceholder}
+                    value={mobile}
+                    onChange={(e) => setMobile(e.target.value)}
+                    disabled={loading}
+                    style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
+                  />
+                </div>
+              </>
             ) : (
               <>
                 <div className="form-group">
@@ -337,6 +415,23 @@ function CheckoutContent() {
               </>
             )}
 
+            {/* Toggle Link */}
+            {!searchParams.get('clinic') && (
+              <div style={{ textAlign: 'center', marginTop: '20px' }}>
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setIsExisting(!isExisting);
+                    setError('');
+                  }}
+                  style={{ color: 'var(--primary)', fontWeight: 600, fontSize: '0.9rem', fontFamily: 'var(--font-ar)', textDecoration: 'none' }}
+                >
+                  {isExisting ? t.newAccountLink : t.existingAccountLink}
+                </a>
+              </div>
+            )}
+
             {/* Submit Button */}
             <button
               type="submit"
@@ -347,11 +442,15 @@ function CheckoutContent() {
                 cursor: 'pointer',
                 height: '48px',
                 borderRadius: '8px',
-                marginTop: '32px',
+                marginTop: '24px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '0 28px'
+                padding: '0 28px',
+                width: '100%',
+                border: 'none',
+                color: '#fff',
+                fontWeight: 'bold'
               }}
               disabled={loading}
             >
@@ -364,20 +463,7 @@ function CheckoutContent() {
           </form>
         </div>
       </div>
-
-      {/* Success Modal Popup with Blurred Background */}
-      {showSuccessModal && (
-        <div className="custom-modal-overlay" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
-          <div className="custom-modal-card" style={{ maxWidth: '440px', padding: '32px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
-            <div style={{ fontSize: '3rem', marginBottom: '16px' }}>
-              {plan === 'trial' ? '🎉' : '🔔'}
-            </div>
-            
-            <h3 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '12px', fontFamily: 'var(--font-ar)' }}>
-              {t.successHeading}
-            </h3>
-            
-            <p style={{ fontSize: '1rem', color: 'var(--text-main)', lineHeight: 1.6, marginBottom: '24px', fontFamily: 'var(--font-ar)' }}>
+    </div>24px', fontFamily: 'var(--font-ar)' }}>
               {successMessage}
             </p>
             

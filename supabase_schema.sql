@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS settings (
 -- 5. Patients record
 CREATE TABLE IF NOT EXISTS patients (
     clinic_id VARCHAR(100) REFERENCES clinics(id) ON DELETE CASCADE NOT NULL,
-    mobile_number VARCHAR(100) PRIMARY KEY,
+    mobile_number VARCHAR(100) NOT NULL,
     name VARCHAR(255) NOT NULL,
     gender VARCHAR(50),
     age INT,
@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS patients (
     whatsapp_enabled INT DEFAULT 1,
     parent_mobile VARCHAR(100),
     is_companion INT DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    PRIMARY KEY (clinic_id, mobile_number)
 );
 
 -- 6. Companions
@@ -98,7 +99,7 @@ CREATE TABLE IF NOT EXISTS medical_services (
 CREATE TABLE IF NOT EXISTS visits (
     clinic_id VARCHAR(100) REFERENCES clinics(id) ON DELETE CASCADE NOT NULL,
     id SERIAL PRIMARY KEY,
-    patient_mobile VARCHAR(100) REFERENCES patients(mobile_number) ON DELETE SET NULL,
+    patient_mobile VARCHAR(100),
     visit_type VARCHAR(50),
     status VARCHAR(50),
     chief_complaint TEXT,

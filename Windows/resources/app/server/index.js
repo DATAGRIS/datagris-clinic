@@ -1185,6 +1185,22 @@ app.post('/api/patients', async (req, res) => {
   }
 });
 
+app.get('/api/notifications/followups', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const followups = await db.queryAll(`
+      SELECT v.follow_up_date, p.name as patient_name, p.mobile_number 
+      FROM visits v 
+      JOIN patients p ON v.patient_mobile = p.mobile_number 
+      WHERE v.status='closed' AND v.follow_up_date = ?
+    `, [today]);
+    res.json(followups);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 app.get('/api/patients/:mobile', async (req, res) => {
   try {
     const patient = await db.queryOne('SELECT * FROM patients WHERE mobile_number = ?', [req.params.mobile]);

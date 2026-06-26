@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
 
     const startDate = new Date();
     const endDate = new Date();
-    endDate.setDate(startDate.getDate() + 365); // 1 Year (365 days)
+    endDate.setDate(startDate.getDate() + 30); // 30 Days (Monthly)
 
     // 4. Check if it is a pending registration or renewals
     if (clinicId.startsWith('PND-')) {
