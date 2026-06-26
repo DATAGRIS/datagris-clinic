@@ -355,7 +355,14 @@ async function runCommand(sql, params = []) {
       let finalSql = pgSql;
       if (pgSql.trim().toUpperCase().startsWith('INSERT INTO')) {
         if (!pgSql.toUpperCase().includes('RETURNING')) {
-          finalSql = pgSql.trim().replace(/;?$/, ' RETURNING id');
+          const match = pgSql.match(/INSERT\s+INTO\s+["']?([a-zA-Z0-9_]+)["']?/i);
+          const tableName = match ? match[1].toLowerCase() : '';
+          const noIdTables = ['patients', 'settings', 'visit_services'];
+          if (noIdTables.includes(tableName)) {
+            finalSql = pgSql.trim().replace(/;?$/, ' RETURNING *');
+          } else {
+            finalSql = pgSql.trim().replace(/;?$/, ' RETURNING id');
+          }
         }
       }
       const result = await client.query(finalSql, cleanParams);
