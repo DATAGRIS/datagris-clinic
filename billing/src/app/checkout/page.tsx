@@ -463,27 +463,6 @@ function CheckoutContent() {
           </form>
         </div>
       </div>
-    </div>24px', fontFamily: 'var(--font-ar)' }}>
-              {successMessage}
-            </p>
-            
-            <button 
-              onClick={handleModalNext}
-              className="form-submit"
-              style={{
-                marginTop: '0',
-                padding: '12px 24px',
-                borderRadius: '8px',
-                fontSize: '1rem',
-                backgroundColor: 'var(--primary)',
-                fontFamily: 'var(--font-ar)'
-              }}
-            >
-              {plan === 'trial' ? t.loginBtn : t.nextBtn}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
