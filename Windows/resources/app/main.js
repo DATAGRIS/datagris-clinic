@@ -229,33 +229,54 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
   }
 });
 
-ipcMain.handle('print-report', async (event, { reportName, htmlContent }) => {
+ipcMain.handle('print-report', async (event, { reportName, htmlContent, printMode }) => {
   try {
     const win = new BrowserWindow({ show: false });
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
     
-    const tempDir = path.join(app.getPath('temp'), 'clinic_os_reports');
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
+    if (printMode === 'pdf') {
+      const pdfBuffer = await win.webContents.printToPDF({
+        margins: { marginType: 'default' },
+        pageSize: 'A4',
+        printBackground: true
+      });
+      
+      const safeReportName = reportName.replace(/[^a-zA-Z0-9_\u0600-\u06FF-]/g, '_');
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: 'Save Report - حفظ التقرير',
+        defaultPath: path.join(app.getPath('downloads'), `${safeReportName}_${Date.now()}.pdf`),
+        filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
+      });
+      
+      if (!result.canceled && result.filePath) {
+        fs.writeFileSync(result.filePath, pdfBuffer);
+        win.close();
+        return { success: true, pdfPath: result.filePath, saved: true };
+      } else {
+        win.close();
+        return { success: true, canceled: true };
+      }
+    } else {
+      // Direct printing - opens the printer selection dialog
+      return new Promise((resolve) => {
+        win.webContents.once('did-finish-load', () => {
+          win.webContents.print({
+            silent: false,
+            printBackground: true,
+            pageSize: 'A4'
+          }, (success, failureReason) => {
+            win.close();
+            if (success) {
+              resolve({ success: true });
+            } else {
+              resolve({ success: false, error: failureReason || 'Canceled or failed' });
+            }
+          });
+        });
+      });
     }
-    const safeReportName = reportName.replace(/[^a-zA-Z0-9_\u0600-\u06FF-]/g, '_');
-    const pdfPath = path.join(tempDir, `${safeReportName}_${Date.now()}.pdf`);
-    
-    const pdfBuffer = await win.webContents.printToPDF({
-      margins: { marginType: 'default' },
-      pageSize: 'A4',
-      printBackground: true
-    });
-    
-    fs.writeFileSync(pdfPath, pdfBuffer);
-    win.close();
-    
-    const { shell } = require('electron');
-    await shell.openPath(pdfPath);
-    
-    return { success: true, pdfPath };
   } catch (err) {
-    console.error('Print Report PDF error:', err);
+    console.error('Print Report error:', err);
     return { success: false, error: err.message };
   }
 });
