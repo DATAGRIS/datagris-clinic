@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getConfig: () => ipcRenderer.invoke('get-config'),
   setConfig: (config) => ipcRenderer.invoke('set-config', config),
   selectLogo: () => ipcRenderer.invoke('select-logo'),
-  printPrescription: (visitId, htmlContent, pageSize) => ipcRenderer.invoke('print-prescription', { visitId, htmlContent, pageSize }),
+  printPrescription: (visitId, htmlContent, pageSize, printMode) => ipcRenderer.invoke('print-prescription', { visitId, htmlContent, pageSize, printMode }),
   printReport: (reportName, htmlContent) => ipcRenderer.invoke('print-report', { reportName, htmlContent }),
   backupDatabase: () => ipcRenderer.invoke('backup-database'),
   restartApp: () => ipcRenderer.send('restart-app'),

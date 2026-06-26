@@ -261,6 +261,7 @@ async function queryAll(sql, params = []) {
       if (activeUserId) {
         await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
         await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+        await client.query(`SET LOCAL ROLE authenticated`);
       }
       const pgSql = translateSqlToPostgres(sql);
       const result = await client.query(pgSql, cleanParams);
@@ -303,6 +304,7 @@ async function queryOne(sql, params = []) {
       if (activeUserId) {
         await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
         await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+        await client.query(`SET LOCAL ROLE authenticated`);
       }
       const pgSql = translateSqlToPostgres(sql);
       const result = await client.query(pgSql, cleanParams);
@@ -350,6 +352,7 @@ async function runCommand(sql, params = []) {
       if (activeUserId) {
         await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
         await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+        await client.query(`SET LOCAL ROLE authenticated`);
       }
       const pgSql = translateSqlToPostgres(sql);
       let finalSql = pgSql;

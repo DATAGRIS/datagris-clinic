@@ -1284,6 +1284,20 @@ app.delete('/api/companions/:id', async (req, res) => {
   }
 });
 
+// Delete Visit (Remove from queue)
+app.delete('/api/visits/:id', async (req, res) => {
+  try {
+    const visit = await db.queryOne('SELECT patient_mobile FROM visits WHERE id = ?', [req.params.id]);
+    if (visit && visit.patient_mobile) {
+      await db.runCommand('DELETE FROM visits WHERE patient_mobile LIKE ?', [`${visit.patient_mobile}_C_%`]);
+    }
+    await db.runCommand('DELETE FROM visits WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 4. Visits & Queue Engine
 app.get('/api/visits/queue', async (req, res) => {
   try {

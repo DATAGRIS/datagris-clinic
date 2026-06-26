@@ -174,36 +174,57 @@ ipcMain.handle('select-logo', async () => {
   return `data:${mimeType};base64,${data.toString('base64')}`;
 });
 
-ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageSize }) => {
+ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageSize, printMode }) => {
   try {
     const win = new BrowserWindow({ show: false });
     
     // Load HTML content
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
     
-    const tempDir = path.join(app.getPath('temp'), 'clinic_os_prescriptions');
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-    const pdfPath = path.join(tempDir, `prescription_${visitId}.pdf`);
-    
     const size = pageSize === 'a5' ? 'A5' : 'A4';
-    const pdfBuffer = await win.webContents.printToPDF({
-      margins: { top: 0, bottom: 0, left: 0, right: 0 },
-      pageSize: size,
-      printBackground: true
-    });
     
-    fs.writeFileSync(pdfPath, pdfBuffer);
-    win.close();
-    
-    // Open using system default PDF viewer
-    const { shell } = require('electron');
-    await shell.openPath(pdfPath);
-    
-    return { success: true, pdfPath };
+    if (printMode === 'pdf') {
+      const pdfBuffer = await win.webContents.printToPDF({
+        margins: { top: 0, bottom: 0, left: 0, right: 0 },
+        pageSize: size,
+        printBackground: true
+      });
+      
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: 'Save Prescription PDF - حفظ الروشتة بصيغة PDF',
+        defaultPath: path.join(app.getPath('downloads'), `prescription_${visitId}.pdf`),
+        filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
+      });
+      
+      if (!result.canceled && result.filePath) {
+        fs.writeFileSync(result.filePath, pdfBuffer);
+        win.close();
+        return { success: true, pdfPath: result.filePath, saved: true };
+      } else {
+        win.close();
+        return { success: true, canceled: true };
+      }
+    } else {
+      // Direct printing - opens the printer selection dialog
+      return new Promise((resolve) => {
+        win.webContents.once('did-finish-load', () => {
+          win.webContents.print({
+            silent: false,
+            printBackground: true,
+            pageSize: size
+          }, (success, failureReason) => {
+            win.close();
+            if (success) {
+              resolve({ success: true });
+            } else {
+              resolve({ success: false, error: failureReason || 'Canceled or failed' });
+            }
+          });
+        });
+      });
+    }
   } catch (err) {
-    console.error('Print PDF error:', err);
+    console.error('Print error:', err);
     return { success: false, error: err.message };
   }
 });
