@@ -3080,10 +3080,25 @@ app.get('/api/referrals', async (req, res) => {
 app.post('/api/referrals', async (req, res) => {
   const { visitId, patientName, partnerId, partnerName, medications, supplies, notes } = req.body;
   try {
+    // Resolve patient name and file number from visitId dynamically to ensure correctness
+    let realPatientName = patientName;
+    let fileNumber = '';
+    
+    if (visitId) {
+      const visitRow = await db.queryOne("SELECT patient_mobile FROM visits WHERE id = ?", [visitId]);
+      if (visitRow && visitRow.patient_mobile) {
+        const patientRow = await db.queryOne("SELECT name, file_number FROM patients WHERE mobile_number = ?", [visitRow.patient_mobile]);
+        if (patientRow) {
+          realPatientName = patientRow.name;
+          fileNumber = patientRow.file_number;
+        }
+      }
+    }
+
     await db.runCommand(
       `INSERT INTO referrals (visit_id, patient_name, partner_id, partner_name, medications_json, supplies_json, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [visitId, patientName, partnerId, partnerName, JSON.stringify(medications || []), JSON.stringify(supplies || []), notes]
+      [visitId, realPatientName, partnerId, partnerName, JSON.stringify(medications || []), JSON.stringify(supplies || []), notes]
     );
 
     // Background WhatsApp dispatch to external partner
@@ -3092,9 +3107,6 @@ app.post('/api/referrals', async (req, res) => {
       if (partner && partner.phone) {
         const settings = await getSystemSettings();
         if (settings.whatsappEnabled === 'true') {
-          const patientRow = await db.queryOne("SELECT file_number FROM patients WHERE name = ?", [patientName]);
-          const fileNumber = patientRow ? patientRow.file_number : '';
-          
           let rawTemplate = settings.whatsappTemplateReferral;
           if (!rawTemplate) {
             rawTemplate = `إحالة جديدة للجهة الخارجية: {partnerName}\nاسم المريض: {patientName}\nرقم الملف: {fileNumber}\nالبيان المطلوب:\n{referralDetails}`;
@@ -3102,7 +3114,7 @@ app.post('/api/referrals', async (req, res) => {
           
           const message = rawTemplate
             .replace(/{partnerName}/g, partner.name || '')
-            .replace(/{patientName}/g, patientName)
+            .replace(/{patientName}/g, realPatientName || '')
             .replace(/{fileNumber}/g, fileNumber || '')
             .replace(/{referralDetails}/g, notes || '');
 
