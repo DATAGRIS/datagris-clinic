@@ -156,7 +156,8 @@ async function getSystemSettings() {
     // Force Pro Plan features globally for all clinic plans
     settings['subscriptionPlan'] = 'pro';
     settings['subscriptionStatus'] = 'active';
-    settings['subscriptionEndDate'] = new Date(Date.now() + 10 * 365 * 24 * 3600 * 1000).toISOString();
+    const now = new Date();
+    settings['subscriptionEndDate'] = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
 
     return settings;
   } catch (err) {
