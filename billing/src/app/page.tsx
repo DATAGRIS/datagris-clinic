@@ -26,7 +26,7 @@ export default function PricingPage() {
 
       basicTitle: 'الخطة الأساسية',
       basicPrice: '3,000',
-      basicPeriod: 'ج.م / سنوياً',
+      basicPeriod: 'ج.م / شهرياً',
       basicDesc: 'الخيار الاقتصادي المثالي للعيادات الصغيرة التي تبحث عن إدارة الملف المرضي والحسابات دون الحاجة للمخازن والواتساب.',
       basicF1: 'إدارة السجلات المرضية وطابور الاستقبال',
       basicF2: 'الروشتة الإلكترونية والمؤشرات الحيوية',
@@ -38,7 +38,7 @@ export default function PricingPage() {
 
       proTitle: 'الخطة الاحترافية',
       proPrice: '5,000',
-      proPeriod: 'ج.م / سنوياً',
+      proPeriod: 'ج.م / شهرياً',
       proDesc: 'الخيار الأقوى والأشمل للعيادات التخصصية والمراكز. تشمل كل شيء حرفياً مع ميزات المخازن، الصيدليات، وأوتوميشن الواتساب.',
       proF1: 'جميع مميزات الخطة الأساسية',
       proF2: 'إدارة الإحالات الخارجية والصيدليات والمعامل',
@@ -66,7 +66,7 @@ export default function PricingPage() {
 
       basicTitle: 'Basic Plan',
       basicPrice: '3,000',
-      basicPeriod: 'EGP / Year',
+      basicPeriod: 'EGP / Month',
       basicDesc: 'The ideal economic choice for private practices looking to manage client history and billing without advanced inventory or WhatsApp.',
       basicF1: 'Manage patient files and queue reception',
       basicF2: 'Digital prescriptions and custom vitals',
@@ -78,7 +78,7 @@ export default function PricingPage() {
 
       proTitle: 'Pro Plan',
       proPrice: '5,000',
-      proPeriod: 'EGP / Year',
+      proPeriod: 'EGP / Month',
       proDesc: 'Our most complete, powerful package for specialized clinics. Everything is included, featuring stock control, pharmacies, and automatic WhatsApp messaging.',
       proF1: 'All features from Basic Plan',
       proF2: 'Complete registry for labs, scans, and partners',
