@@ -64,15 +64,23 @@ function CheckoutContent() {
   // Synchronize plan and clinic ID state when search param changes
   useEffect(() => {
     const p = searchParams.get('plan');
-    if (p) {
-      setPlan(p);
-      setError('');
-    }
     const c = searchParams.get('clinic');
-    if (c) {
-      setClinicId(c);
+    const isExist = !!c;
+    
+    if (isExist) {
       setIsExisting(true);
+      setClinicId(c);
+      if (p === 'trial' || !p) {
+        setPlan('pro');
+      } else {
+        setPlan(p);
+      }
+    } else {
+      if (p) {
+        setPlan(p);
+      }
     }
+    setError('');
   }, [searchParams]);
 
   // Translations
@@ -470,7 +478,11 @@ function CheckoutContent() {
                   href="#"
                   onClick={(e) => {
                     e.preventDefault();
-                    setIsExisting(!isExisting);
+                    const nextIsExisting = !isExisting;
+                    setIsExisting(nextIsExisting);
+                    if (nextIsExisting && plan === 'trial') {
+                      setPlan('pro');
+                    }
                     setError('');
                   }}
                   style={{ color: 'var(--primary)', fontWeight: 600, fontSize: '0.9rem', fontFamily: 'var(--font-ar)', textDecoration: 'none' }}

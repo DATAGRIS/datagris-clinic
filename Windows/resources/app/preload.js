@@ -69,6 +69,116 @@ function startSyncStatusPolling() {
   syncStatusInterval = setInterval(updateStatus, 5000); // Poll status every 5 seconds
 }
 
+function openSubscriptionModal() {
+  const existingModal = document.getElementById('subscription-details-modal');
+  if (existingModal) existingModal.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'subscription-details-modal';
+  modal.style.position = 'fixed';
+  modal.style.top = '0';
+  modal.style.left = '0';
+  modal.style.width = '100vw';
+  modal.style.height = '100vh';
+  modal.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
+  modal.style.backdropFilter = 'blur(8px)';
+  modal.style.display = 'flex';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+  modal.style.zIndex = '999999';
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '---';
+    const d = new Date(dateStr);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const plan = appConfig.subscriptionPlan || 'trial';
+  const status = appConfig.subscriptionStatus || 'trial';
+  const start = appConfig.subscriptionStartDate || '';
+  const end = appConfig.subscriptionEndDate || '';
+  
+  let daysRemaining = 0;
+  if (end) {
+    daysRemaining = Math.max(0, Math.ceil((new Date(end) - new Date()) / (1000 * 60 * 60 * 24)));
+  }
+
+  const isTrial = plan === 'trial';
+  const isBasic = plan === 'basic';
+  
+  let planTitleAr = 'النسخة التجريبية (7 أيام)';
+  if (plan === 'pro') {
+    planTitleAr = 'الخطة الاحترافية (برو)';
+  } else if (plan === 'basic') {
+    planTitleAr = 'الخطة الأساسية (بيزك)';
+  }
+
+  modal.innerHTML = `
+    <div style="background: var(--bg-card, #1e293b); border: 1px solid var(--border-color, #334155); border-radius: 16px; padding: 24px; max-width: 480px; width: 90%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3); color: var(--text-main, #f8fafc); font-family: 'Cairo', sans-serif; direction: rtl; box-sizing: border-box;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color, #334155); padding-bottom: 12px;">
+        <h3 style="margin: 0; font-size: 1.1rem; color: var(--primary, #3b82f6); font-weight: 800;">تفاصيل الاشتراك / Subscription Details</h3>
+        <button id="close-sub-modal-btn" style="background: none; border: none; color: var(--text-muted, #94a3b8); cursor: pointer; font-size: 1.2rem; font-weight: bold; padding: 4px;">✕</button>
+      </div>
+      
+      <div style="display: flex; flex-direction: column; gap: 12px; font-size: 0.9rem; line-height: 1.6;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--text-muted, #94a3b8);">نوع الباقة / Plan:</span>
+          <span style="font-weight: 700;">${planTitleAr}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--text-muted, #94a3b8);">حالة الاشتراك / Status:</span>
+          <span style="font-weight: 700; color: ${status === 'active' || status === 'pro' ? '#10b981' : '#f59e0b'}">${status === 'active' || status === 'pro' ? 'نشط / Active' : 'تجريبي / Trial'}</span>
+        </div>
+        ${start ? `
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--text-muted, #94a3b8);">تاريخ البدء / Start Date:</span>
+          <span style="font-weight: 600; direction: ltr;">${formatDate(start)}</span>
+        </div>
+        ` : ''}
+        ${end ? `
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--text-muted, #94a3b8);">تاريخ الانتهاء / End Date:</span>
+          <span style="font-weight: 600; direction: ltr;">${formatDate(end)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; background: rgba(59, 130, 246, 0.08); padding: 8px 12px; border-radius: 8px; border: 1px dashed rgba(59, 130, 246, 0.2); margin-top: 4px;">
+          <span style="color: var(--text-muted, #94a3b8);">الوقت المتبقي / Time Left:</span>
+          <span style="font-weight: 700; color: var(--primary, #3b82f6);">${daysRemaining} يوم / days</span>
+        </div>
+        ` : ''}
+      </div>
+
+      ${(isTrial || isBasic) ? `
+      <div style="margin-top: 24px; text-align: center;">
+        <button id="upgrade-modal-action-btn" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #10b981 0%, #3b82f6 100%); color: #fff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-family: 'Cairo', sans-serif; font-size: 0.9rem; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2); transition: transform 0.2s;">
+          ترقية الاشتراك للباقة الاحترافية (برو) / Upgrade to Pro
+        </button>
+      </div>
+      ` : ''}
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  modal.querySelector('#close-sub-modal-btn').addEventListener('click', () => {
+    modal.remove();
+  });
+  
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) {
+      modal.remove();
+    }
+  });
+
+  const upgradeBtn = modal.querySelector('#upgrade-modal-action-btn');
+  if (upgradeBtn) {
+    upgradeBtn.addEventListener('click', () => {
+      const clinicId = appConfig.clinicId || 'Unknown';
+      ipcRenderer.invoke('open-external', `https://clinic.billing.datagris.com/checkout?clinic=${encodeURIComponent(clinicId)}&plan=pro`);
+      modal.remove();
+    });
+  }
+}
+
 function applyUIModifications() {
   if (appConfig && !appConfig.subscriptionPlan) {
     fetch('http://localhost:5000/api/settings')
@@ -281,133 +391,77 @@ function applyUIModifications() {
       document.head.appendChild(style);
     }
 
-    // B. Inject Plan Status Badge above the profile card
+    // B. Inject Stacked Footer Actions (Subscription + Logout buttons)
     const sidebarFooter = document.querySelector('.sidebar-footer');
-    if (sidebarFooter && !document.getElementById('plan-status-badge')) {
-      const badge = document.createElement('div');
-      badge.id = 'plan-status-badge';
-      badge.style.margin = '0 12px 10px 12px';
-      badge.style.padding = '6px 12px';
-      badge.style.borderRadius = '12px';
-      badge.style.fontSize = '0.75rem';
-      badge.style.fontWeight = 'bold';
-      badge.style.textAlign = 'center';
-      badge.style.display = 'flex';
-      badge.style.alignItems = 'center';
-      badge.style.justifyContent = 'center';
-      badge.style.gap = '6px';
-      badge.style.border = '1px solid rgba(255, 255, 255, 0.08)';
+    if (sidebarFooter && !document.getElementById('premium-footer-actions')) {
+      const oldBadge = document.getElementById('plan-status-badge');
+      if (oldBadge) oldBadge.remove();
+      const oldActions = document.getElementById('profile-actions-container');
+      if (oldActions) oldActions.remove();
 
-      const status = appConfig.subscriptionStatus || 'trial';
-      if (status === 'pro' || status === 'active') {
-        badge.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
-        badge.style.color = '#10b981';
-        badge.style.borderColor = 'rgba(16, 185, 129, 0.2)';
-        badge.innerHTML = `
-          <span style="width: 6px; height: 6px; border-radius: 50%; background-color: #10b981; box-shadow: 0 0 6px #10b981;"></span>
-          <span>الخطة الاحترافية (برو) / Pro Plan</span>
-        `;
-      } else if (status === 'expired') {
-        badge.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-        badge.style.color = '#ef4444';
-        badge.style.borderColor = 'rgba(239, 68, 68, 0.2)';
-        badge.innerHTML = `
-          <span style="width: 6px; height: 6px; border-radius: 50%; background-color: #ef4444; box-shadow: 0 0 6px #ef4444;"></span>
-          <span>انتهى الاشتراك / Expired</span>
-        `;
-      } else {
-        badge.style.backgroundColor = 'rgba(245, 158, 11, 0.1)';
-        badge.style.color = '#f59e0b';
-        badge.style.borderColor = 'rgba(245, 158, 11, 0.2)';
-        badge.innerHTML = `
-          <span style="width: 6px; height: 6px; border-radius: 50%; background-color: #f59e0b; box-shadow: 0 0 6px #f59e0b;"></span>
-          <span>النسخة التجريبية (7 أيام) / 7-Day Trial</span>
-        `;
-      }
-
-      sidebarFooter.insertBefore(badge, sidebarFooter.firstChild);
-    }
-
-    // C. Inject Actions Container (Upgrade Button + Logout Button) in the profile card
-    const profileDetails = document.querySelector('.user-profile-summary > div:last-child');
-    if (profileDetails && !document.getElementById('profile-actions-container')) {
-      const detailsText = profileDetails.textContent || '';
+      const profileDetails = document.querySelector('.user-profile-summary > div:last-child');
+      const detailsText = profileDetails ? (profileDetails.textContent || '') : '';
       const isAdmin = detailsText.includes('مدير') || 
                       detailsText.toLowerCase().includes('admin') ||
                       detailsText.toLowerCase().includes('administrator');
 
-      const actionsContainer = document.createElement('div');
-      actionsContainer.id = 'profile-actions-container';
-      actionsContainer.style.marginTop = '10px';
-      actionsContainer.style.display = 'flex';
-      actionsContainer.style.flexDirection = 'column';
-      actionsContainer.style.gap = '8px';
-      actionsContainer.style.width = '100%';
+      const container = document.createElement('div');
+      container.id = 'premium-footer-actions';
+      container.style.width = '100%';
+      container.style.marginTop = '12px';
+      container.style.boxSizing = 'border-box';
+      container.style.display = 'flex';
+      container.style.flexDirection = 'column';
 
-      // 1. Upgrade button (only for Admin/Manager if not already Pro)
-      const status = appConfig.subscriptionStatus || 'trial';
+      // 1. Subscription Card Button
+      const subCard = document.createElement('div');
+      subCard.className = 'premium-card-btn';
+      
       const plan = appConfig.subscriptionPlan || 'trial';
-      const isPro = status === 'pro' || status === 'active' || plan === 'pro';
-      if (isAdmin && !isPro) {
-        const upgradeBtn = document.createElement('button');
-        upgradeBtn.id = 'upgrade-to-pro-btn';
-        upgradeBtn.style.backgroundColor = 'var(--accent, #3b82f6)';
-        upgradeBtn.style.color = '#ffffff';
-        upgradeBtn.style.border = 'none';
-        upgradeBtn.style.borderRadius = '8px';
-        upgradeBtn.style.padding = '8px 12px';
-        upgradeBtn.style.fontSize = '0.75rem';
-        upgradeBtn.style.fontWeight = 'bold';
-        upgradeBtn.style.cursor = 'pointer';
-        upgradeBtn.style.display = 'flex';
-        upgradeBtn.style.alignItems = 'center';
-        upgradeBtn.style.justifyContent = 'center';
-        upgradeBtn.style.gap = '6px';
-        upgradeBtn.style.transition = 'all 0.2s ease';
-
-        upgradeBtn.innerHTML = `
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2 4l3 12h14l3-12-6 7-4-7-4 7-6-7z"></path>
-            <path d="M5 20h14"></path>
-          </svg>
-          <span>الترقية للاحترافية / Upgrade to Pro</span>
+      const status = appConfig.subscriptionStatus || 'trial';
+      
+      if (plan === 'pro' || status === 'active' || status === 'pro') {
+        subCard.className += ' premium-pro-card';
+        subCard.innerHTML = `
+          <span>خطة برو الاحترافية / Pro Plan</span>
         `;
-
-        upgradeBtn.addEventListener('mouseenter', () => {
-          upgradeBtn.style.opacity = '0.9';
-          upgradeBtn.style.transform = 'scale(1.02)';
-        });
-        upgradeBtn.addEventListener('mouseleave', () => {
-          upgradeBtn.style.opacity = '1';
-          upgradeBtn.style.transform = 'scale(1)';
-        });
-
-        upgradeBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          const billingUrl = getBillingUrl();
-          ipcRenderer.invoke('open-external', `${billingUrl}/checkout?clinic=${encodeURIComponent(clinicId)}&plan=pro`);
-        });
-
-        actionsContainer.appendChild(upgradeBtn);
+      } else if (plan === 'basic') {
+        subCard.className += ' premium-basic-card';
+        subCard.innerHTML = `
+          <span>خطة بيزك الأساسية / Basic Plan</span>
+        `;
+      } else {
+        subCard.className += ' premium-trial-card';
+        subCard.innerHTML = `
+          <span>النسخة التجريبية / Free Trial</span>
+        `;
       }
 
-      // 2. Logout button (available for all accounts)
-      const logoutBtn = document.createElement('button');
-      logoutBtn.id = 'profile-logout-btn';
-      logoutBtn.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-      logoutBtn.style.color = '#ef4444';
-      logoutBtn.style.border = '1px solid rgba(239, 68, 68, 0.2)';
-      logoutBtn.style.borderRadius = '8px';
-      logoutBtn.style.padding = '8px 12px';
-      logoutBtn.style.fontSize = '0.75rem';
-      logoutBtn.style.fontWeight = 'bold';
-      logoutBtn.style.cursor = 'pointer';
-      logoutBtn.style.display = 'flex';
-      logoutBtn.style.alignItems = 'center';
-      logoutBtn.style.justifyContent = 'center';
-      logoutBtn.style.gap = '6px';
-      logoutBtn.style.transition = 'all 0.2s ease';
+      // Add info button only if admin
+      if (isAdmin) {
+        const infoBtn = document.createElement('button');
+        infoBtn.className = 'info-icon-btn';
+        infoBtn.title = 'تفاصيل الاشتراك / Subscription Details';
+        infoBtn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+        `;
+        infoBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openSubscriptionModal();
+        });
+        subCard.appendChild(infoBtn);
+      }
 
+      container.appendChild(subCard);
+
+      // 2. Logout Button
+      const logoutBtn = document.createElement('button');
+      logoutBtn.className = 'premium-logout-btn';
       logoutBtn.innerHTML = `
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
@@ -416,16 +470,6 @@ function applyUIModifications() {
         </svg>
         <span>تسجيل الخروج / Logout</span>
       `;
-
-      logoutBtn.addEventListener('mouseenter', () => {
-        logoutBtn.style.backgroundColor = 'rgba(239, 68, 68, 0.2)';
-        logoutBtn.style.transform = 'scale(1.02)';
-      });
-      logoutBtn.addEventListener('mouseleave', () => {
-        logoutBtn.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-        logoutBtn.style.transform = 'scale(1)';
-      });
-
       logoutBtn.addEventListener('click', (e) => {
         e.preventDefault();
         const defaultLogoutBtn = document.querySelector('.sidebar-footer > button') || document.querySelector('.sidebar-footer > .btn-logout');
@@ -433,9 +477,9 @@ function applyUIModifications() {
           defaultLogoutBtn.click();
         }
       });
+      container.appendChild(logoutBtn);
 
-      actionsContainer.appendChild(logoutBtn);
-      profileDetails.appendChild(actionsContainer);
+      sidebarFooter.appendChild(container);
     }
 
     // D. Inject Sync Status Indicator in header (Circle dot ONLY, detailed stats on hover)
@@ -478,47 +522,102 @@ window.addEventListener('DOMContentLoaded', () => {
         50% { transform: scale(1.15); opacity: 1; }
         100% { transform: scale(0.95); opacity: 0.85; }
       }
+      
+      .premium-pro-card {
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(59, 130, 246, 0.15) 100%) !important;
+        border: 1px solid #10b981 !important;
+        color: #10b981 !important;
+        box-shadow: 0 0 15px rgba(16, 185, 129, 0.25) !important;
+        animation: proGlow 4s infinite ease-in-out !important;
+      }
+      
+      @keyframes proGlow {
+        0% { box-shadow: 0 0 10px rgba(16, 185, 129, 0.2); border-color: #10b981; }
+        50% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); border-color: #3b82f6; }
+        100% { box-shadow: 0 0 10px rgba(16, 185, 129, 0.2); border-color: #10b981; }
+      }
+      
+      .premium-basic-card {
+        background: rgba(59, 130, 246, 0.08) !important;
+        border: 1px solid rgba(59, 130, 246, 0.3) !important;
+        color: #3b82f6 !important;
+      }
+      
+      .premium-trial-card {
+        background: rgba(245, 158, 11, 0.05) !important;
+        border: 1px solid rgba(245, 158, 11, 0.25) !important;
+        color: #f59e0b !important;
+      }
+      
+      .premium-card-btn {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        font-family: 'Cairo', sans-serif;
+        box-sizing: border-box;
+        margin-bottom: 8px;
+        text-decoration: none;
+        cursor: default;
+        transition: all 0.3s ease;
+      }
+      
+      .premium-logout-btn {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        font-family: 'Cairo', sans-serif;
+        box-sizing: border-box;
+        background-color: rgba(239, 68, 68, 0.1);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.2);
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      
+      .premium-logout-btn:hover {
+        background-color: rgba(239, 68, 68, 0.2);
+        transform: scale(1.02);
+      }
+      
+      .info-icon-btn {
+        background: none;
+        border: none;
+        color: inherit;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4px;
+        border-radius: 4px;
+        transition: background 0.2s;
+      }
+      
+      .info-icon-btn:hover {
+        background: rgba(255, 255, 255, 0.12);
+      }
     `;
     document.head.appendChild(style);
   }
 
   // Set up click outside notifications popup handler to auto-close it
   document.addEventListener('click', (event) => {
-    const dropdown = Array.from(document.querySelectorAll('div')).find(el => {
-      if (el.id === 'sync-status-widget' || el.id === 'datagris-system-overview') return false;
-      const style = window.getComputedStyle(el);
-      if (style.position !== 'absolute' && style.position !== 'fixed') return false;
-      return el.textContent.includes('التنبيهات') || 
-             el.textContent.includes('Notifications') || 
-             el.textContent.includes('إشعارات') ||
-             el.className.includes('notification') ||
-             el.className.includes('dropdown');
-    });
-
+    const dropdown = document.querySelector('.notifications-dropdown');
     if (dropdown) {
-      if (dropdown.contains(event.target)) {
-        return; // clicked inside, do nothing
-      }
-      
-      const headerControls = document.querySelector('.main-content header > div:last-child');
-      if (headerControls) {
-        const clickedButton = event.target.closest('button');
-        if (clickedButton && headerControls.contains(clickedButton)) {
-          return; // clicked toggle trigger button, let React do the work
-        }
-
-        // Programmatically click the bell button to toggle it closed
-        const bellButton = Array.from(headerControls.querySelectorAll('button')).find(btn => {
-          return btn.querySelector('svg') && (
-            btn.textContent.match(/\d+/) || 
-            btn.querySelector('.badge') ||
-            btn.innerHTML.includes('notification') ||
-            btn.innerHTML.includes('bell')
-          );
-        }) || Array.from(headerControls.querySelectorAll('button')).find(btn => btn.contains(dropdown.parentElement));
-
-        if (bellButton) {
-          bellButton.click();
+      const button = dropdown.previousElementSibling;
+      if (!dropdown.contains(event.target) && (!button || !button.contains(event.target))) {
+        if (button) {
+          button.click();
         }
       }
     }
