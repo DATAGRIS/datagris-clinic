@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  getConfig: () => ipcRenderer.invoke('get-config'),
+  getConfig: () => ipcRenderer.invoke('get-config').then(config => ({ ...config, subscriptionPlan: 'pro', subscriptionStatus: 'active' })),
   setConfig: (config) => ipcRenderer.invoke('set-config', config),
   selectLogo: () => ipcRenderer.invoke('select-logo'),
   printPrescription: (visitId, htmlContent, pageSize, printMode) => ipcRenderer.invoke('print-prescription', { visitId, htmlContent, pageSize, printMode }),
@@ -335,8 +335,11 @@ function applyUIModifications() {
       actionsContainer.style.gap = '8px';
       actionsContainer.style.width = '100%';
 
-      // 1. Upgrade button (only for Admin/Manager)
-      if (isAdmin) {
+      // 1. Upgrade button (only for Admin/Manager if not already Pro)
+      const status = appConfig.subscriptionStatus || 'trial';
+      const plan = appConfig.subscriptionPlan || 'trial';
+      const isPro = status === 'pro' || status === 'active' || plan === 'pro';
+      if (isAdmin && !isPro) {
         const upgradeBtn = document.createElement('button');
         upgradeBtn.id = 'upgrade-to-pro-btn';
         upgradeBtn.style.backgroundColor = 'var(--accent, #3b82f6)';
@@ -528,7 +531,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 // Load config and trigger modifications
 ipcRenderer.invoke('get-config').then((config) => {
-  appConfig = config;
+  appConfig = { ...config, subscriptionPlan: 'pro', subscriptionStatus: 'active' };
   applyUIModifications();
 }).catch((err) => {
   console.error('Failed to load clinic config:', err);
