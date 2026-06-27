@@ -142,8 +142,10 @@ async function getSystemSettings() {
           settings['subscriptionEndDate'] = new Date(sub.subscription_end_date).toISOString();
         }
         
-        if (sub.whatsapp_api_key) {
-          settings['whatsappAccessToken'] = secureCrypto.decrypt(sub.whatsapp_api_key);
+        if (sub.whatsapp_api_key && sub.status === 'active') {
+          const decryptedKey = secureCrypto.decrypt(sub.whatsapp_api_key);
+          settings['whatsappAccessToken'] = decryptedKey;
+          settings['whatsappApiKey'] = decryptedKey;
         }
         if (sub.whatsapp_provider) {
           settings['whatsappProvider'] = sub.whatsapp_provider;
