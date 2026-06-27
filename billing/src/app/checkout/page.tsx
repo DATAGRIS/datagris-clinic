@@ -517,7 +517,7 @@ function CheckoutContent() {
               {loading
                 ? t.submitLoading
                 : isExisting
-                ? (lang === 'ar' ? 'المتابعة للدفع والتفعيل' : 'Proceed to Payment & Activate')
+                ? (lang === 'ar' ? 'تجديد الاشتراك' : 'Renew Subscription')
                 : plan === 'trial'
                 ? t.submitTrial
                 : t.submitPaid}

@@ -22,6 +22,13 @@ export default function ClientLayoutWrapper({ children }: ClientLayoutWrapperPro
     }
   }, []);
 
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+      document.documentElement.lang = lang;
+    }
+  }, [lang]);
+
   // Translation mapping
   const t = {
     ar: {

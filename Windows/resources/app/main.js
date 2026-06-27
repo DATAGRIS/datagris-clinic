@@ -180,12 +180,17 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
     const size = pageSize === 'a5' ? 'A5' : 'A4';
     
     if (printMode === 'pdf') {
-      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+      const tempPath = path.join(app.getPath('temp'), `temp_prescription_${visitId}_${Date.now()}.html`);
+      fs.writeFileSync(tempPath, htmlContent, 'utf8');
+      await win.loadFile(tempPath);
+      
       const pdfBuffer = await win.webContents.printToPDF({
         margins: { top: 0, bottom: 0, left: 0, right: 0 },
         pageSize: size,
         printBackground: true
       });
+      
+      try { fs.unlinkSync(tempPath); } catch (e) {}
       
       const result = await dialog.showSaveDialog(mainWindow, {
         title: 'Save Prescription PDF - حفظ الروشتة بصيغة PDF',
@@ -204,6 +209,9 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
     } else {
       // Direct printing - opens the printer selection dialog
       return new Promise((resolve) => {
+        const tempPath = path.join(app.getPath('temp'), `temp_prescription_${visitId}_${Date.now()}.html`);
+        fs.writeFileSync(tempPath, htmlContent, 'utf8');
+        
         win.webContents.once('did-finish-load', () => {
           win.webContents.print({
             silent: false,
@@ -211,6 +219,7 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
             pageSize: size
           }, (success, failureReason) => {
             win.close();
+            try { fs.unlinkSync(tempPath); } catch (e) {}
             if (success) {
               resolve({ success: true });
             } else {
@@ -219,7 +228,8 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
           });
         });
         
-        win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`).catch(err => {
+        win.loadFile(tempPath).catch(err => {
+          try { fs.unlinkSync(tempPath); } catch (e) {}
           resolve({ success: false, error: err.message });
         });
       });
@@ -235,12 +245,17 @@ ipcMain.handle('print-report', async (event, { reportName, htmlContent, printMod
     const win = new BrowserWindow({ show: false });
     
     if (printMode === 'pdf') {
-      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+      const tempPath = path.join(app.getPath('temp'), `temp_report_${Date.now()}.html`);
+      fs.writeFileSync(tempPath, htmlContent, 'utf8');
+      await win.loadFile(tempPath);
+      
       const pdfBuffer = await win.webContents.printToPDF({
         margins: { marginType: 'default' },
         pageSize: 'A4',
         printBackground: true
       });
+      
+      try { fs.unlinkSync(tempPath); } catch (e) {}
       
       const safeReportName = reportName.replace(/[^a-zA-Z0-9_\u0600-\u06FF-]/g, '_');
       const result = await dialog.showSaveDialog(mainWindow, {
@@ -260,6 +275,9 @@ ipcMain.handle('print-report', async (event, { reportName, htmlContent, printMod
     } else {
       // Direct printing - opens the printer selection dialog
       return new Promise((resolve) => {
+        const tempPath = path.join(app.getPath('temp'), `temp_report_${Date.now()}.html`);
+        fs.writeFileSync(tempPath, htmlContent, 'utf8');
+        
         win.webContents.once('did-finish-load', () => {
           win.webContents.print({
             silent: false,
@@ -267,6 +285,7 @@ ipcMain.handle('print-report', async (event, { reportName, htmlContent, printMod
             pageSize: 'A4'
           }, (success, failureReason) => {
             win.close();
+            try { fs.unlinkSync(tempPath); } catch (e) {}
             if (success) {
               resolve({ success: true });
             } else {
@@ -275,7 +294,8 @@ ipcMain.handle('print-report', async (event, { reportName, htmlContent, printMod
           });
         });
         
-        win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`).catch(err => {
+        win.loadFile(tempPath).catch(err => {
+          try { fs.unlinkSync(tempPath); } catch (e) {}
           resolve({ success: false, error: err.message });
         });
       });

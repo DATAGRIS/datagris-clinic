@@ -951,13 +951,27 @@ app.post('/api/users', async (req, res) => {
   if (isPostgres) {
     const supabaseUrl = process.env.SUPABASE_URL || '';
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-    const clinicId = process.env.CLINIC_ID || '';
+    let clinicId = process.env.CLINIC_ID || '';
 
     if (!supabaseUrl || !supabaseServiceKey) {
       return res.status(500).json({ error: 'Supabase configuration or Service Role key is missing on the server.' });
     }
 
     try {
+      if (!clinicId) {
+        const activeUserId = db.getRequestUserId();
+        if (activeUserId) {
+          const userProfile = await db.queryOne('SELECT clinic_id FROM profiles WHERE id = ?', [activeUserId]);
+          if (userProfile) {
+            clinicId = userProfile.clinic_id;
+          }
+        }
+      }
+
+      if (!clinicId) {
+        return res.status(400).json({ error: 'تعذر تحديد معرف العيادة للمستخدم الحالي.' });
+      }
+
       const existing = await db.queryOne('SELECT * FROM profiles WHERE username = ?', [username.trim().toLowerCase()]);
       if (existing) {
         return res.status(400).json({ error: 'اسم المستخدم مسجل مسبقاً' });
