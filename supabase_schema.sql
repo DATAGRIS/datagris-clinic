@@ -425,6 +425,7 @@ ALTER TABLE treasury_expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE whatsapp_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE clinic_logos ENABLE ROW LEVEL SECURITY;
 
 -- Helper function to fetch the clinic_id of the currently authenticated Supabase user
 CREATE OR REPLACE FUNCTION get_user_clinic_id()
@@ -448,6 +449,7 @@ CREATE POLICY vouchers_clinic_isolation ON vouchers FOR ALL USING (clinic_id = g
 CREATE POLICY audit_logs_clinic_isolation ON audit_logs FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());
 CREATE POLICY examination_templates_clinic_isolation ON examination_templates FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());
 CREATE POLICY refunds_clinic_isolation ON refunds FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());
+CREATE POLICY clinic_logos_clinic_isolation ON clinic_logos FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());
 CREATE POLICY external_partners_clinic_isolation ON external_partners FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());
 CREATE POLICY referrals_clinic_isolation ON referrals FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());
 CREATE POLICY chat_messages_clinic_isolation ON chat_messages FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());
@@ -519,3 +521,10 @@ CREATE OR REPLACE TRIGGER trg_set_patient_doctor_and_clinic
 BEFORE INSERT OR UPDATE ON patients
 FOR EACH ROW
 EXECUTE FUNCTION set_patient_doctor_and_clinic();
+
+-- 21. Clinic Logos Table
+CREATE TABLE IF NOT EXISTS clinic_logos (
+    clinic_id VARCHAR(100) PRIMARY KEY REFERENCES clinics(id) ON DELETE CASCADE,
+    logo_data TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);

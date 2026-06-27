@@ -165,6 +165,22 @@ async function getSystemSettings() {
       settings['subscriptionEndDate'] = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
     }
 
+    // Fetch clinic logo from clinic_logos table if it exists
+    try {
+      const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+      let logoRow;
+      if (isPostgres) {
+        logoRow = await db.queryOne("SELECT logo_data FROM clinic_logos WHERE clinic_id = ?", [db.getClinicUserId() || 'CLN-000001']);
+      } else {
+        logoRow = await db.queryOne("SELECT logo_data FROM clinic_logos LIMIT 1");
+      }
+      if (logoRow && logoRow.logo_data) {
+        settings['clinicLogo'] = logoRow.logo_data;
+      }
+    } catch (logoErr) {
+      // Safe fallback if table doesn't exist
+    }
+
     return settings;
   } catch (err) {
     console.error('Error fetching settings:', err);
@@ -708,6 +724,16 @@ app.post('/api/settings', async (req, res) => {
           'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (clinic_id, key) DO UPDATE SET value = EXCLUDED.value',
           [key, valueToStore]
         );
+        if (key === 'clinicLogo') {
+          try {
+            await db.runCommand(
+              'INSERT INTO clinic_logos (clinic_id, logo_data) VALUES (?, ?) ON CONFLICT (clinic_id) DO UPDATE SET logo_data = EXCLUDED.logo_data',
+              [db.getClinicUserId() || 'CLN-000001', valueToStore]
+            );
+          } catch (logoErr) {
+            console.error('Failed to store in clinic_logos:', logoErr);
+          }
+        }
       } else if (isMysql) {
         await db.runCommand(
           'INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?',
@@ -718,6 +744,19 @@ app.post('/api/settings', async (req, res) => {
           'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
           [key, valueToStore]
         );
+        if (key === 'clinicLogo') {
+          try {
+            await db.runCommand(
+              'CREATE TABLE IF NOT EXISTS clinic_logos (clinic_id TEXT PRIMARY KEY, logo_data TEXT)'
+            );
+            await db.runCommand(
+              'INSERT OR REPLACE INTO clinic_logos (clinic_id, logo_data) VALUES (?, ?)',
+              ['CLN-000001', valueToStore]
+            );
+          } catch (logoErr) {
+            console.error('Failed to store in SQLite clinic_logos:', logoErr);
+          }
+        }
       }
     }
     // Log audit
