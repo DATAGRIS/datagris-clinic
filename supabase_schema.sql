@@ -431,7 +431,7 @@ RETURNS VARCHAR(100) AS $$
 $$ LANGUAGE sql SECURITY DEFINER;
 
 -- RLS Policies targeting clinic isolation
-CREATE POLICY profiles_clinic_isolation ON profiles FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());
+CREATE POLICY profiles_clinic_isolation ON profiles FOR ALL USING (id = auth.uid() OR clinic_id = get_user_clinic_id()) WITH CHECK (id = auth.uid() OR clinic_id = get_user_clinic_id());
 CREATE POLICY subscriptions_clinic_isolation ON subscriptions FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());
 CREATE POLICY settings_clinic_isolation ON settings FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());
 CREATE POLICY patients_clinic_isolation ON patients FOR ALL USING (clinic_id = get_user_clinic_id()) WITH CHECK (clinic_id = get_user_clinic_id());

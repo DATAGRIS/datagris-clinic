@@ -95,7 +95,7 @@ export default function ContactPage() {
         </p>
       </div>
 
-      <div className="form-card" style={{ background: 'var(--bg-card)', padding: '36px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }}>
+      <div className="form-card" style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }}>
         {success && (
           <div className="checkout-success-banner" style={{ textAlign: 'start', margin: '0 0 20px 0' }}>
             🎉 {t.successMsg}

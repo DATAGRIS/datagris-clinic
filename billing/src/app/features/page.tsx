@@ -63,7 +63,7 @@ export default function FeaturesPage() {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '30px', marginTop: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '30px', marginTop: '20px' }}>
         {t.featuresList.map((f, i) => (
           <div key={i} className="pricing-card" style={{ padding: '32px', display: 'flex', flexDirection: 'column', textAlign: 'start' }}>
             <h3 style={{ fontSize: '1.25rem', color: 'var(--primary)', marginBottom: '12px', fontFamily: 'var(--font-ar)' }}>{f.title}</h3>
