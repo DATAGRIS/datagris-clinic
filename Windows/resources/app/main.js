@@ -177,13 +177,10 @@ ipcMain.handle('select-logo', async () => {
 ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageSize, printMode }) => {
   try {
     const win = new BrowserWindow({ show: false });
-    
-    // Load HTML content
-    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
-    
     const size = pageSize === 'a5' ? 'A5' : 'A4';
     
     if (printMode === 'pdf') {
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
       const pdfBuffer = await win.webContents.printToPDF({
         margins: { top: 0, bottom: 0, left: 0, right: 0 },
         pageSize: size,
@@ -221,6 +218,10 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
             }
           });
         });
+        
+        win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`).catch(err => {
+          resolve({ success: false, error: err.message });
+        });
       });
     }
   } catch (err) {
@@ -232,9 +233,9 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
 ipcMain.handle('print-report', async (event, { reportName, htmlContent, printMode }) => {
   try {
     const win = new BrowserWindow({ show: false });
-    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
     
     if (printMode === 'pdf') {
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
       const pdfBuffer = await win.webContents.printToPDF({
         margins: { marginType: 'default' },
         pageSize: 'A4',
@@ -272,6 +273,10 @@ ipcMain.handle('print-report', async (event, { reportName, htmlContent, printMod
               resolve({ success: false, error: failureReason || 'Canceled or failed' });
             }
           });
+        });
+        
+        win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`).catch(err => {
+          resolve({ success: false, error: err.message });
         });
       });
     }

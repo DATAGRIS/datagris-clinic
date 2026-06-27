@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setConfig: (config) => ipcRenderer.invoke('set-config', config),
   selectLogo: () => ipcRenderer.invoke('select-logo'),
   printPrescription: (visitId, htmlContent, pageSize, printMode) => ipcRenderer.invoke('print-prescription', { visitId, htmlContent, pageSize, printMode }),
-  printReport: (reportName, htmlContent, printMode) => ipcRenderer.invoke('print-report', { reportName, htmlContent, printMode }),
+  printReport: (reportName, htmlContent, printMode) => ipcRenderer.invoke('print-report', { reportName, htmlContent, printMode: printMode || 'pdf' }),
   backupDatabase: () => ipcRenderer.invoke('backup-database'),
   restartApp: () => ipcRenderer.send('restart-app'),
   onQueueUpdate: (callback) => {
