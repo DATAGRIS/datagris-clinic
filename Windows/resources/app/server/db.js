@@ -125,7 +125,7 @@ async function configurePostgresDefaults(client) {
     'refunds', 'external_partners', 'referrals', 'chat_messages', 
     'inventory_transactions', 'visit_inventory_items', 'treasury_sessions', 
     'treasury_transactions', 'treasury_expenses', 'whatsapp_logs', 
-    'notifications', 'reports'
+    'notifications', 'reports', 'clinic_logos'
   ];
   console.log('Configuring PostgreSQL defaults for clinic_id column...');
   for (const table of tables) {
@@ -133,6 +133,24 @@ async function configurePostgresDefaults(client) {
       await client.query(`ALTER TABLE "${table}" ALTER COLUMN clinic_id SET DEFAULT get_user_clinic_id()`);
     } catch (e) {
       console.warn(`Failed to alter table ${table} defaults: ${e.message}`);
+    }
+  }
+
+  // Reset PostgreSQL sequences to match actual max values (avoid constraint duplicates on insert)
+  const tablesWithSerialIds = [
+    'companions', 'medical_services', 'visits', 'employees', 'inventory_items', 
+    'vouchers', 'audit_logs', 'referrals', 'inventory_transactions', 
+    'visit_inventory_items', 'treasury_sessions', 'treasury_transactions', 
+    'treasury_expenses', 'notifications', 'reports'
+  ];
+  console.log('Resetting PostgreSQL sequences to avoid ID collision...');
+  for (const table of tablesWithSerialIds) {
+    try {
+      await client.query(`
+        SELECT setval(pg_get_serial_sequence('${table}', 'id'), coalesce(max(id), 1)) FROM "${table}"
+      `);
+    } catch (e) {
+      // Ignore if table has no serial sequence
     }
   }
 }

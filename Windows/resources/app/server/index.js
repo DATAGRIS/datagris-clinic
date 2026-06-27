@@ -1218,8 +1218,24 @@ app.get('/api/patients', async (req, res) => {
 app.post('/api/patients', async (req, res) => {
   const { mobileNumber, name, gender, age, weight, height, temperature, chiefComplaint, medicalHistory, whatsappEnabled, vitalsJson } = req.body;
   try {
+    let mobileNumberToUse = mobileNumber ? String(mobileNumber).trim() : '';
+    if (!mobileNumberToUse || mobileNumberToUse === '0' || mobileNumberToUse.toLowerCase() === 'none') {
+      mobileNumberToUse = 'TEMP-' + Date.now() + '-' + Math.floor(1000 + Math.random() * 9000);
+    }
+
     // Check if patient exists
-    const existing = await db.queryOne('SELECT * FROM patients WHERE mobile_number = ?', [mobileNumber]);
+    let existing = await db.queryOne('SELECT * FROM patients WHERE mobile_number = ?', [mobileNumberToUse]);
+    if (existing && name && existing.name && existing.name.trim().toLowerCase() !== name.trim().toLowerCase()) {
+      let suffix = 1;
+      let uniqueMobile = `${mobileNumberToUse}-${suffix}`;
+      while (await db.queryOne('SELECT * FROM patients WHERE mobile_number = ?', [uniqueMobile])) {
+        suffix++;
+        uniqueMobile = `${mobileNumberToUse}-${suffix}`;
+      }
+      mobileNumberToUse = uniqueMobile;
+      existing = null;
+    }
+
     const wsEnabled = whatsappEnabled !== undefined ? (whatsappEnabled ? 1 : 0) : 1;
 
     let fileNumber = '';
@@ -1229,7 +1245,7 @@ app.post('/api/patients', async (req, res) => {
       await db.runCommand(
         `UPDATE patients SET name = ?, gender = ?, age = ?, weight = ?, height = ?, temperature = ?, chief_complaint = ?, medical_history_json = ?, whatsapp_enabled = ?, vitals_json = ? 
          WHERE mobile_number = ?`,
-        [name, gender, age, weight, height, temperature, chiefComplaint, JSON.stringify(medicalHistory || {}), wsEnabled, vitalsJson || null, mobileNumber]
+        [name, gender, age, weight, height, temperature, chiefComplaint, JSON.stringify(medicalHistory || {}), wsEnabled, vitalsJson || null, mobileNumberToUse]
       );
     } else {
       // Generate unique file number PAT-XXXXXX
@@ -1251,7 +1267,7 @@ app.post('/api/patients', async (req, res) => {
         `INSERT INTO patients (mobile_number, name, gender, age, weight, height, temperature, chief_complaint, medical_history_json, file_number, registration_date, registration_time, whatsapp_enabled, vitals_json) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          mobileNumber, name, gender, age, weight, height, temperature, chiefComplaint, 
+          mobileNumberToUse, name, gender, age, weight, height, temperature, chiefComplaint, 
           JSON.stringify(medicalHistory || {}), fileNumber, todayStr, timeStr, wsEnabled, vitalsJson || null
         ]
       );
