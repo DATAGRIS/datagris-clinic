@@ -491,3 +491,31 @@ CREATE OR REPLACE TRIGGER trigger_delete_clinic_on_owner_profile_delete
 AFTER DELETE ON profiles
 FOR EACH ROW
 EXECUTE FUNCTION delete_clinic_on_owner_profile_delete();
+
+-- Trigger to automatically set clinic_name and doctor_name on insert or update of patients
+CREATE OR REPLACE FUNCTION set_patient_doctor_and_clinic()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Fetch clinic name from clinics table based on NEW.clinic_id if not provided
+    IF NEW.clinic_name IS NULL OR NEW.clinic_name = '' THEN
+        SELECT name INTO NEW.clinic_name FROM clinics WHERE id = NEW.clinic_id;
+    END IF;
+
+    -- Fetch doctor name from settings table based on NEW.clinic_id and key = 'doctorName'
+    IF NEW.doctor_name IS NULL OR NEW.doctor_name = '' THEN
+        SELECT value INTO NEW.doctor_name FROM settings WHERE clinic_id = NEW.clinic_id AND key = 'doctorName';
+    END IF;
+
+    -- Fallback: if doctor_name is still empty, look for a profile with role = 'doctor' or 'owner'
+    IF NEW.doctor_name IS NULL OR NEW.doctor_name = '' THEN
+        SELECT full_name INTO NEW.doctor_name FROM profiles WHERE clinic_id = NEW.clinic_id AND (role = 'doctor' OR role = 'owner') LIMIT 1;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER trg_set_patient_doctor_and_clinic
+BEFORE INSERT OR UPDATE ON patients
+FOR EACH ROW
+EXECUTE FUNCTION set_patient_doctor_and_clinic();
