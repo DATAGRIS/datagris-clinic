@@ -153,6 +153,11 @@ async function getSystemSettings() {
       // Safe fallback if table/columns don't exist on local SQLite
     }
 
+    // Force Pro Plan features globally for all clinic plans
+    settings['subscriptionPlan'] = 'pro';
+    settings['subscriptionStatus'] = 'active';
+    settings['subscriptionEndDate'] = new Date(Date.now() + 10 * 365 * 24 * 3600 * 1000).toISOString();
+
     return settings;
   } catch (err) {
     console.error('Error fetching settings:', err);
@@ -181,6 +186,18 @@ function generatePrescriptionPdf(visit, patient, settings) {
           hasArabicFont = true;
         } catch (e) {
           console.error('Failed to register system Arabic font:', e);
+        }
+      }
+
+      // Draw Logo if it exists
+      if (settings.clinicLogo && settings.clinicLogo.startsWith('data:image')) {
+        try {
+          const base64Data = settings.clinicLogo.replace(/^data:image\/\w+;base64,/, "");
+          const imgBuffer = Buffer.from(base64Data, 'base64');
+          doc.image(imgBuffer, { fit: [60, 60], align: 'center' });
+          doc.moveDown(0.5);
+        } catch (err) {
+          console.error('Error drawing logo in PDF:', err);
         }
       }
 
@@ -1118,6 +1135,7 @@ app.get('/api/patients', async (req, res) => {
   try {
     let query = `
       SELECT p.*,
+        (SELECT name FROM patients WHERE mobile_number = p.parent_mobile LIMIT 1) as parent_name,
         (SELECT payment_date FROM visits WHERE patient_mobile = p.mobile_number ORDER BY id DESC LIMIT 1) as last_visit_date,
         (SELECT payment_time FROM visits WHERE patient_mobile = p.mobile_number ORDER BY id DESC LIMIT 1) as last_visit_time
       FROM patients p
@@ -1219,7 +1237,7 @@ app.get('/api/notifications/followups', async (req, res) => {
 
 app.get('/api/patients/:mobile', async (req, res) => {
   try {
-    const patient = await db.queryOne('SELECT * FROM patients WHERE mobile_number = ?', [req.params.mobile]);
+    const patient = await db.queryOne("SELECT p.*, (SELECT name FROM patients WHERE mobile_number = p.parent_mobile LIMIT 1) as parent_name FROM patients p WHERE p.mobile_number = ?", [req.params.mobile]);
     if (!patient) return res.status(404).json({ error: 'المريض غير موجود' });
     
     // Load companions
@@ -1287,11 +1305,30 @@ app.delete('/api/companions/:id', async (req, res) => {
 // Delete Visit (Remove from queue)
 app.delete('/api/visits/:id', async (req, res) => {
   try {
-    const visit = await db.queryOne('SELECT patient_mobile FROM visits WHERE id = ?', [req.params.id]);
+    const visitId = req.params.id;
+    const visit = await db.queryOne('SELECT patient_mobile FROM visits WHERE id = ?', [visitId]);
     if (visit && visit.patient_mobile) {
+      // Find all companion visits that will be deleted
+      const companions = await db.queryAll('SELECT id FROM visits WHERE patient_mobile LIKE ?', [`${visit.patient_mobile}_C_%`]);
+      const companionIds = companions.map(c => c.id);
+      
+      // Delete companion visits
       await db.runCommand('DELETE FROM visits WHERE patient_mobile LIKE ?', [`${visit.patient_mobile}_C_%`]);
+      
+      // Delete companion treasury transactions
+      if (companionIds.length > 0) {
+        const placeHolders = companionIds.map(() => '?').join(',');
+        await db.runCommand(`DELETE FROM treasury_transactions WHERE related_visit_id IN (${placeHolders})`, companionIds);
+      }
     }
-    await db.runCommand('DELETE FROM visits WHERE id = ?', [req.params.id]);
+    
+    // Delete the main visit's treasury transactions
+    await db.runCommand('DELETE FROM treasury_transactions WHERE related_visit_id = ?', [visitId]);
+    
+    // Delete the main visit
+    await db.runCommand('DELETE FROM visits WHERE id = ?', [visitId]);
+    
+    broadcast({ event: 'QUEUE_UPDATE' });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1530,6 +1567,37 @@ app.get('/api/visits/:id', async (req, res) => {
     if (!visit) return res.status(404).json({ error: 'الزيارة غير موجودة' });
     res.json(visit);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Generate Prescription PDF Endpoint
+app.get('/api/visits/:id/pdf', async (req, res) => {
+  try {
+    const visitId = req.params.id;
+    const visit = await db.queryOne('SELECT * FROM visits WHERE id = ?', [visitId]);
+    if (!visit) {
+      return res.status(404).json({ error: 'الزيارة غير موجودة' });
+    }
+    
+    // Fetch patient name and details
+    const patient = await db.queryOne('SELECT * FROM patients WHERE mobile_number = ?', [visit.patient_mobile]);
+    if (!patient) {
+      visit.patient_name = 'مريض';
+    } else {
+      visit.patient_name = patient.name;
+      visit.patient_age = patient.age;
+      visit.file_number = patient.file_number;
+    }
+    
+    const settings = await getSystemSettings();
+    const pdfBuffer = await generatePrescriptionPdf(visit, patient || { name: 'مريض' }, settings);
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=prescription_${visitId}.pdf`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error('Error generating PDF:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2722,13 +2790,13 @@ app.get('/api/reports/dashboard', async (req, res) => {
     });
 
     // 1. Gross Revenues
-    const dailyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE status='closed' AND DATE(closed_at) = ?", [today]);
-    const weeklyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE status='closed' AND DATE(closed_at) >= ?", [lastWeek]);
-    const monthlyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE status='closed' AND DATE(closed_at) >= ?", [lastMonth]);
-    const yearlyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE status='closed' AND DATE(closed_at) >= ?", [lastYear]);
+    const dailyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date = ? OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at LIKE ?)", [today, `${today}%`]);
+    const weeklyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date >= ? OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at >= ?)", [lastWeek, lastWeek]);
+    const monthlyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date >= ? OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at >= ?)", [lastMonth, lastMonth]);
+    const yearlyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date >= ? OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at >= ?)", [lastYear, lastYear]);
 
     // 2. Refunds (Patient)
-    const dailyRef = await db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND DATE(created_at) = ?", [today]);
+    const dailyRef = await db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND created_at LIKE ?", [`${today}%`]);
     const weeklyRef = await db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND DATE(created_at) >= ?", [lastWeek]);
     const monthlyRef = await db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND DATE(created_at) >= ?", [lastMonth]);
     const yearlyRef = await db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND DATE(created_at) >= ?", [lastYear]);
@@ -2743,9 +2811,9 @@ app.get('/api/reports/dashboard', async (req, res) => {
     // 3. Counts
     const patientStats = await db.queryOne("SELECT COUNT(*) as total_patients FROM patients");
     const serviceStats = await db.queryOne("SELECT COUNT(*) as total_services FROM medical_services WHERE is_disabled = 0");
-    const visitStats = await db.queryOne("SELECT COUNT(*) as total_visits FROM visits WHERE status='closed'");
-    const consultStats = await db.queryOne("SELECT COUNT(*) as total FROM visits WHERE status='closed' AND visit_type='consultation'");
-    const followupStats = await db.queryOne("SELECT COUNT(*) as total FROM visits WHERE status='closed' AND visit_type='followup'");
+    const visitStats = await db.queryOne("SELECT COUNT(*) as total_visits FROM visits WHERE status IN ('completed', 'closed')");
+    const consultStats = await db.queryOne("SELECT COUNT(*) as total FROM visits WHERE status IN ('completed', 'closed') AND visit_type='consultation'");
+    const followupStats = await db.queryOne("SELECT COUNT(*) as total FROM visits WHERE status IN ('completed', 'closed') AND visit_type='followup'");
 
     // 4. Waiting & Consultation Time Analytics
     const waitStats = await db.queryOne(`
@@ -2753,20 +2821,20 @@ app.get('/api/reports/dashboard', async (req, res) => {
              MIN(waiting_time_seconds) as min_wait,
              MAX(waiting_time_seconds) as max_wait
       FROM visits
-      WHERE status='closed' AND waiting_time_seconds IS NOT NULL AND waiting_time_seconds > 0
+      WHERE status IN ('completed', 'closed') AND waiting_time_seconds IS NOT NULL AND waiting_time_seconds > 0
     `);
     
     const durationStats = await db.queryOne(`
       SELECT AVG(consultation_duration_seconds) as avg_duration
       FROM visits
-      WHERE status='closed' AND consultation_duration_seconds IS NOT NULL AND consultation_duration_seconds > 0
+      WHERE status IN ('completed', 'closed') AND consultation_duration_seconds IS NOT NULL AND consultation_duration_seconds > 0
     `);
 
     // 5. Patient Satisfaction Counts
     const satisfactionStats = await db.queryAll(`
       SELECT satisfaction_status, COUNT(*) as count
       FROM visits
-      WHERE status='closed' AND satisfaction_status IS NOT NULL
+      WHERE status IN ('completed', 'closed') AND satisfaction_status IS NOT NULL
       GROUP BY satisfaction_status
     `);
 
@@ -2789,20 +2857,20 @@ app.get('/api/reports/dashboard', async (req, res) => {
       SELECT v.follow_up_date, p.name as patient_name, p.mobile_number 
       FROM visits v 
       JOIN patients p ON v.patient_mobile = p.mobile_number 
-      WHERE v.status='closed' AND v.follow_up_date >= ? 
+      WHERE v.status IN ('completed', 'closed') AND v.follow_up_date >= ? 
       ORDER BY v.follow_up_date ASC LIMIT 5
     `, [today]);
 
     // 8. DB-agnostic monthly timeline grouping
-    const allClosedVisits = await db.queryAll("SELECT paid_amount, closed_at, visit_type FROM visits WHERE status='closed'");
+    const allClosedVisits = await db.queryAll("SELECT paid_amount, payment_date, created_at, visit_type FROM visits WHERE status IN ('completed', 'closed')");
     const monthlyGroups = {};
     allClosedVisits.forEach(v => {
-      if (!v.closed_at) return;
-      const month = v.closed_at.substring(0, 7); // 'YYYY-MM'
+      const dateVal = v.payment_date || (v.created_at ? v.created_at.substring(0, 10) : today);
+      const month = dateVal.substring(0, 7); // 'YYYY-MM'
       if (!monthlyGroups[month]) {
         monthlyGroups[month] = { month, revenue: 0, count: 0, expenses: 0 };
       }
-      monthlyGroups[month].revenue += v.paid_amount;
+      monthlyGroups[month].revenue += v.paid_amount || 0;
       monthlyGroups[month].count += 1;
     });
     
@@ -2816,7 +2884,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
         if (monthlyGroups[month].revenue < 0) monthlyGroups[month].revenue = 0;
       }
     });
-
+ 
     // Also group filtered payment vouchers (expenses) by month
     payments.forEach(p => {
       if (!p.created_at) return;
