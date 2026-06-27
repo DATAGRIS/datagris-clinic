@@ -59,11 +59,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'مفتاح Paymob Public Key غير مهيأ في الخادم' }, { status: 500 });
     }
 
-    // Determine pricing plan (Basic: 3000 EGP, Pro: 5000 EGP)
-    let amountCents = 300000; // Default Basic: 3,000.00 EGP
-    if (plan === 'pro') {
-      amountCents = 500000; // Pro: 5,000.00 EGP
+    // Fetch live global USD exchange rates to determine exact dynamic EGP amount
+    let egpRate = 49.53; // stable fallback
+    try {
+      const rateRes = await axios.get('https://open.er-api.com/v6/latest/USD');
+      if (rateRes.data && rateRes.data.rates && rateRes.data.rates.EGP) {
+        egpRate = parseFloat(rateRes.data.rates.EGP);
+        console.log('Fetched live EGP exchange rate:', egpRate);
+      }
+    } catch (rateErr) {
+      console.error('Failed to fetch live exchange rate on backend, using fallback:', rateErr);
     }
+
+    const usdPrice = plan === 'pro' ? 100 : 60;
+    const egpPrice = usdPrice * egpRate;
+    
+    // Amount in cents (egpPrice * 100) rounded to nearest integer
+    const amountCents = Math.round(egpPrice * 100);
+    console.log(`Checkout price: ${usdPrice} USD = ${egpPrice} EGP (Cents: ${amountCents})`);
 
     const merchantOrderId = `${clinicId}_${plan}_${Date.now()}`;
 

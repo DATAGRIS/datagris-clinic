@@ -9,7 +9,7 @@ interface ClientLayoutWrapperProps {
 }
 
 export default function ClientLayoutWrapper({ children }: ClientLayoutWrapperProps) {
-  const { theme, setTheme, lang, setLang } = useBilling();
+  const { theme, setTheme, lang, setLang, currency, setCurrency } = useBilling();
   const [showSettings, setShowSettings] = useState(false);
 
   // Translation mapping
@@ -25,7 +25,11 @@ export default function ClientLayoutWrapper({ children }: ClientLayoutWrapperPro
       appearance: 'المظهر',
       lightMode: 'مضيء',
       darkMode: 'داكن',
-      close: 'إغلاق'
+      close: 'إغلاق',
+      currency: 'العملة',
+      egp: 'جنيه',
+      usd: 'دولار',
+      sar: 'ريال'
     },
     en: {
       pricing: 'Pricing',
@@ -38,7 +42,11 @@ export default function ClientLayoutWrapper({ children }: ClientLayoutWrapperPro
       appearance: 'Appearance',
       lightMode: 'Light',
       darkMode: 'Dark',
-      close: 'Close'
+      close: 'Close',
+      currency: 'Currency',
+      egp: 'EGP',
+      usd: 'USD',
+      sar: 'SAR'
     }
   }[lang];
 
@@ -243,6 +251,70 @@ export default function ClientLayoutWrapper({ children }: ClientLayoutWrapperPro
                     </button>
                   </div>
                 </div>
+
+                {/* Currency Selector (Three options) */}
+                <div style={{ marginTop: '16px' }}>
+                  <label style={{ fontWeight: 600, fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px', display: 'block', fontFamily: 'var(--font-ar)' }}>
+                    {t.currency}
+                  </label>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button 
+                      onClick={() => setCurrency('EGP')}
+                      style={{
+                        flex: 1,
+                        padding: '6px 4px',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        border: currency === 'EGP' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                        backgroundColor: currency === 'EGP' ? 'var(--primary)' : 'transparent',
+                        color: currency === 'EGP' ? '#ffffff' : 'var(--text-main)',
+                        fontFamily: 'var(--font-ar)'
+                      }}
+                    >
+                      {t.egp}
+                    </button>
+                    <button 
+                      onClick={() => setCurrency('USD')}
+                      style={{
+                        flex: 1,
+                        padding: '6px 4px',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        border: currency === 'USD' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                        backgroundColor: currency === 'USD' ? 'var(--primary)' : 'transparent',
+                        color: currency === 'USD' ? '#ffffff' : 'var(--text-main)',
+                        fontFamily: 'var(--font-en)'
+                      }}
+                    >
+                      {t.usd}
+                    </button>
+                    <button 
+                      onClick={() => setCurrency('SAR')}
+                      style={{
+                        flex: 1,
+                        padding: '6px 4px',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        border: currency === 'SAR' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                        backgroundColor: currency === 'SAR' ? 'var(--primary)' : 'transparent',
+                        color: currency === 'SAR' ? '#ffffff' : 'var(--text-main)',
+                        fontFamily: 'var(--font-ar)'
+                      }}
+                    >
+                      {t.sar}
+                    </button>
+                  </div>
+                </div>
+
               </div>
             )}
           </div>

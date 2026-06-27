@@ -7,8 +7,38 @@ import { useBilling } from '../BillingContext';
 function CheckoutContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { lang } = useBilling();
+  const { lang, currency, rates } = useBilling();
   
+  const getPlanLabel = (key: 'trial' | 'basic' | 'pro') => {
+    let symbol = 'USD';
+    let rate = 1.0;
+    if (currency === 'EGP') {
+      symbol = lang === 'ar' ? 'ج.م' : 'EGP';
+      rate = rates.EGP;
+    } else if (currency === 'SAR') {
+      symbol = lang === 'ar' ? 'ر.س' : 'SAR';
+      rate = rates.SAR;
+    } else {
+      symbol = lang === 'ar' ? '$' : 'USD';
+    }
+
+    if (key === 'trial') {
+      return lang === 'ar'
+        ? `باقة تجريبية - 7 أيام مجاناً (0 ${symbol})`
+        : `7-Day Free Trial (0 ${symbol})`;
+    } else if (key === 'basic') {
+      const price = (60 * rate).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', { maximumFractionDigits: 1 });
+      return lang === 'ar'
+        ? `الباقة الأساسية - شهري (${price} ${symbol})`
+        : `Basic Plan - Monthly (${price} ${symbol})`;
+    } else {
+      const price = (100 * rate).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', { maximumFractionDigits: 1 });
+      return lang === 'ar'
+        ? `الباقة الاحترافية - شهري (${price} ${symbol})`
+        : `Pro Plan - Monthly (${price} ${symbol})`;
+    }
+  };
+
   const existingClinicId = searchParams.get('clinic') || '';
   const initialPlan = searchParams.get('plan') || 'trial';
 
@@ -307,9 +337,9 @@ function CheckoutContent() {
                 disabled={loading || !!searchParams.get('plan')}
                 style={{ height: '46px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
               >
-                {!isExisting && <option value="trial">{t.selectPlanTrial}</option>}
-                <option value="basic">{t.selectPlanBasic}</option>
-                <option value="pro">{t.selectPlanPro}</option>
+                {!isExisting && <option value="trial">{getPlanLabel('trial')}</option>}
+                <option value="basic">{getPlanLabel('basic')}</option>
+                <option value="pro">{getPlanLabel('pro')}</option>
               </select>
             </div>
 
