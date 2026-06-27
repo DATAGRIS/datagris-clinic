@@ -121,7 +121,7 @@ async function getSystemSettings() {
         const activeUserId = db.getRequestUserId() || db.getClinicUserId();
         if (activeUserId) {
           subQuery = `
-            SELECT s.plan, s.status, s.subscription_start_date, s.subscription_end_date, s.whatsapp_api_key, s.whatsapp_provider 
+            SELECT s.plan, s.status, s.subscription_start_date, s.subscription_end_date, s.whatsapp_api_key, s.whatsapp_provider, s.whatsapp_api_key_status 
             FROM subscriptions s
             JOIN profiles p ON s.clinic_id = p.clinic_id
             WHERE p.id = ?
@@ -142,7 +142,7 @@ async function getSystemSettings() {
           settings['subscriptionEndDate'] = new Date(sub.subscription_end_date).toISOString();
         }
         
-        if (sub.whatsapp_api_key && sub.status === 'active') {
+        if (sub.whatsapp_api_key && sub.whatsapp_api_key_status === 'active') {
           const decryptedKey = secureCrypto.decrypt(sub.whatsapp_api_key);
           settings['whatsappAccessToken'] = decryptedKey;
           settings['whatsappApiKey'] = decryptedKey;
