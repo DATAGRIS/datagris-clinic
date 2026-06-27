@@ -184,8 +184,11 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
       fs.writeFileSync(tempPath, htmlContent, 'utf8');
       await win.loadFile(tempPath);
       
+      // Wait for did-finish-load to ensure complete rendering before printing
+      await new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
+      
       const pdfBuffer = await win.webContents.printToPDF({
-        margins: { top: 0, bottom: 0, left: 0, right: 0 },
+        margins: { marginType: 'none' },
         pageSize: size,
         printBackground: true
       });
@@ -198,41 +201,37 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
         filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
       });
       
+      win.close();
+      
       if (!result.canceled && result.filePath) {
         fs.writeFileSync(result.filePath, pdfBuffer);
-        win.close();
         return { success: true, pdfPath: result.filePath, saved: true };
       } else {
-        win.close();
         return { success: true, canceled: true };
       }
     } else {
       // Direct printing - opens the printer selection dialog
-      return new Promise((resolve) => {
-        const tempPath = path.join(app.getPath('temp'), `temp_prescription_${visitId}_${Date.now()}.html`);
-        fs.writeFileSync(tempPath, htmlContent, 'utf8');
-        
-        win.webContents.once('did-finish-load', () => {
-          win.webContents.print({
-            silent: false,
-            printBackground: true,
-            pageSize: size
-          }, (success, failureReason) => {
-            win.close();
-            try { fs.unlinkSync(tempPath); } catch (e) {}
-            if (success) {
-              resolve({ success: true });
-            } else {
-              resolve({ success: false, error: failureReason || 'Canceled or failed' });
-            }
-          });
+      const tempPath = path.join(app.getPath('temp'), `temp_prescription_${visitId}_${Date.now()}.html`);
+      fs.writeFileSync(tempPath, htmlContent, 'utf8');
+      await win.loadFile(tempPath);
+      
+      // Wait for did-finish-load
+      await new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
+      
+      try {
+        await win.webContents.print({
+          silent: false,
+          printBackground: true,
+          pageSize: size
         });
-        
-        win.loadFile(tempPath).catch(err => {
-          try { fs.unlinkSync(tempPath); } catch (e) {}
-          resolve({ success: false, error: err.message });
-        });
-      });
+        win.close();
+        try { fs.unlinkSync(tempPath); } catch (e) {}
+        return { success: true };
+      } catch (err) {
+        win.close();
+        try { fs.unlinkSync(tempPath); } catch (e) {}
+        return { success: false, error: err.message || 'Canceled or failed' };
+      }
     }
   } catch (err) {
     console.error('Print error:', err);
@@ -249,6 +248,9 @@ ipcMain.handle('print-report', async (event, { reportName, htmlContent, printMod
       fs.writeFileSync(tempPath, htmlContent, 'utf8');
       await win.loadFile(tempPath);
       
+      // Wait for did-finish-load to ensure complete rendering before printing
+      await new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
+      
       const pdfBuffer = await win.webContents.printToPDF({
         margins: { marginType: 'default' },
         pageSize: 'A4',
@@ -264,41 +266,37 @@ ipcMain.handle('print-report', async (event, { reportName, htmlContent, printMod
         filters: [{ name: 'PDF Files', extensions: ['pdf'] }]
       });
       
+      win.close();
+      
       if (!result.canceled && result.filePath) {
         fs.writeFileSync(result.filePath, pdfBuffer);
-        win.close();
         return { success: true, pdfPath: result.filePath, saved: true };
       } else {
-        win.close();
         return { success: true, canceled: true };
       }
     } else {
       // Direct printing - opens the printer selection dialog
-      return new Promise((resolve) => {
-        const tempPath = path.join(app.getPath('temp'), `temp_report_${Date.now()}.html`);
-        fs.writeFileSync(tempPath, htmlContent, 'utf8');
-        
-        win.webContents.once('did-finish-load', () => {
-          win.webContents.print({
-            silent: false,
-            printBackground: true,
-            pageSize: 'A4'
-          }, (success, failureReason) => {
-            win.close();
-            try { fs.unlinkSync(tempPath); } catch (e) {}
-            if (success) {
-              resolve({ success: true });
-            } else {
-              resolve({ success: false, error: failureReason || 'Canceled or failed' });
-            }
-          });
+      const tempPath = path.join(app.getPath('temp'), `temp_report_${Date.now()}.html`);
+      fs.writeFileSync(tempPath, htmlContent, 'utf8');
+      await win.loadFile(tempPath);
+      
+      // Wait for did-finish-load
+      await new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
+      
+      try {
+        await win.webContents.print({
+          silent: false,
+          printBackground: true,
+          pageSize: 'A4'
         });
-        
-        win.loadFile(tempPath).catch(err => {
-          try { fs.unlinkSync(tempPath); } catch (e) {}
-          resolve({ success: false, error: err.message });
-        });
-      });
+        win.close();
+        try { fs.unlinkSync(tempPath); } catch (e) {}
+        return { success: true };
+      } catch (err) {
+        win.close();
+        try { fs.unlinkSync(tempPath); } catch (e) {}
+        return { success: false, error: err.message || 'Canceled or failed' };
+      }
     }
   } catch (err) {
     console.error('Print Report error:', err);
