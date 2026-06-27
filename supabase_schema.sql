@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS patients (
     parent_mobile VARCHAR(100),
     is_companion INT DEFAULT 0,
     vitals_json TEXT,
+    doctor_name VARCHAR(255),
+    clinic_name VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     PRIMARY KEY (clinic_id, mobile_number)
 );
