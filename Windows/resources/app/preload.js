@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  getConfig: () => ipcRenderer.invoke('get-config').then(config => ({ ...config, subscriptionPlan: 'pro', subscriptionStatus: 'active' })),
+  getConfig: () => ipcRenderer.invoke('get-config'),
   setConfig: (config) => ipcRenderer.invoke('set-config', config),
   selectLogo: () => ipcRenderer.invoke('select-logo'),
   printPrescription: (visitId, htmlContent, pageSize, printMode) => ipcRenderer.invoke('print-prescription', { visitId, htmlContent, pageSize, printMode }),
@@ -70,6 +70,15 @@ function startSyncStatusPolling() {
 }
 
 function applyUIModifications() {
+  if (appConfig && !appConfig.subscriptionPlan) {
+    fetch('http://localhost:5000/api/settings')
+      .then(res => res.json())
+      .then(settings => {
+        appConfig = { ...appConfig, ...settings };
+        applyUIModifications();
+      })
+      .catch(() => {});
+  }
   // 1. Check if we are on the Login Page
   const isLoginPage = !document.querySelector('.sidebar') && (
     document.querySelector('form') ||
@@ -531,7 +540,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 // Load config and trigger modifications
 ipcRenderer.invoke('get-config').then((config) => {
-  appConfig = { ...config, subscriptionPlan: 'pro', subscriptionStatus: 'active' };
+  appConfig = config;
   applyUIModifications();
 }).catch((err) => {
   console.error('Failed to load clinic config:', err);

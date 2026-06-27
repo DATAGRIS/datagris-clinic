@@ -138,7 +138,9 @@ async function getSystemSettings() {
         if (sub.subscription_start_date) {
           settings['subscriptionStartDate'] = new Date(sub.subscription_start_date).toISOString();
         }
-        if (sub.subscription_end_date) {
+        if (sub.plan === 'trial' && sub.trial_end_date) {
+          settings['subscriptionEndDate'] = new Date(sub.trial_end_date).toISOString();
+        } else if (sub.subscription_end_date) {
           settings['subscriptionEndDate'] = new Date(sub.subscription_end_date).toISOString();
         }
         
@@ -155,11 +157,13 @@ async function getSystemSettings() {
       // Safe fallback if table/columns don't exist on local SQLite
     }
 
-    // Force Pro Plan features globally for all clinic plans
-    settings['subscriptionPlan'] = 'pro';
-    settings['subscriptionStatus'] = 'active';
-    const now = new Date();
-    settings['subscriptionEndDate'] = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
+    // Force Pro Plan features fallback only if subscriptionPlan is not dynamically resolved
+    if (!settings['subscriptionPlan']) {
+      settings['subscriptionPlan'] = 'pro';
+      settings['subscriptionStatus'] = 'active';
+      const now = new Date();
+      settings['subscriptionEndDate'] = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
+    }
 
     return settings;
   } catch (err) {
