@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useBilling } from './BillingContext';
 
@@ -11,6 +11,16 @@ interface ClientLayoutWrapperProps {
 export default function ClientLayoutWrapper({ children }: ClientLayoutWrapperProps) {
   const { theme, setTheme, lang, setLang, currency, setCurrency } = useBilling();
   const [showSettings, setShowSettings] = useState(false);
+  const [isUpgradeFlow, setIsUpgradeFlow] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('clinic')) {
+        setIsUpgradeFlow(true);
+      }
+    }
+  }, []);
 
   // Translation mapping
   const t = {
@@ -319,9 +329,11 @@ export default function ClientLayoutWrapper({ children }: ClientLayoutWrapperPro
             )}
           </div>
           
-          <Link href="/checkout?plan=trial" className="nav-btn">
-            {t.startTrial}
-          </Link>
+          {!isUpgradeFlow && (
+            <Link href="/checkout?plan=trial" className="nav-btn">
+              {t.startTrial}
+            </Link>
+          )}
         </div>
       </header>
 
