@@ -41,6 +41,28 @@ function CheckoutContent() {
 
   const existingClinicId = searchParams.get('clinic') || '';
   const initialPlan = searchParams.get('plan') || 'trial';
+  const currentPlan = searchParams.get('currentPlan') || 'trial';
+
+  const getButtonText = () => {
+    const isAr = lang === 'ar';
+    const normalizedCurrent = currentPlan.toLowerCase().trim();
+    const normalizedSelected = plan.toLowerCase().trim();
+    
+    if (normalizedCurrent === 'trial' || normalizedCurrent.startsWith('trial')) {
+      return isAr ? 'الاشتراك' : 'Subscribe';
+    }
+    
+    const isSamePlan = 
+      normalizedCurrent === normalizedSelected || 
+      (normalizedCurrent.startsWith('basic') && normalizedSelected.startsWith('basic')) ||
+      (normalizedCurrent.startsWith('pro') && normalizedSelected.startsWith('pro'));
+      
+    if (isSamePlan) {
+      return isAr ? 'تجديد الاشتراك' : 'Renew Subscription';
+    } else {
+      return isAr ? 'الاشتراك الآن' : 'Subscribe Now';
+    }
+  };
 
   // Form State
   const [plan, setPlan] = useState(initialPlan);
@@ -517,7 +539,7 @@ function CheckoutContent() {
               {loading
                 ? t.submitLoading
                 : isExisting
-                ? (lang === 'ar' ? 'تجديد الاشتراك' : 'Renew Subscription')
+                ? getButtonText()
                 : plan === 'trial'
                 ? t.submitTrial
                 : t.submitPaid}
