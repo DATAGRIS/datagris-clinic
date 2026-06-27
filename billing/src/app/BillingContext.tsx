@@ -21,7 +21,7 @@ const BillingContext = createContext<BillingContextProps | undefined>(undefined)
 export function BillingProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>('light');
   const [lang, setLang] = useState<Lang>('ar');
-  const [currency, setCurrency] = useState<Currency>('EGP');
+  const [currency, setCurrency] = useState<Currency>('USD');
   const [rates, setRates] = useState<{ EGP: number; SAR: number }>({ EGP: 49.53, SAR: 3.75 });
   const [mounted, setMounted] = useState(false);
 

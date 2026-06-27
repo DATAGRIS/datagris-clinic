@@ -121,63 +121,7 @@ export default function PricingPage() {
         </p>
       </div>
 
-      {/* Sleek Currency Selector Toggle */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '40px', gap: '10px', flexWrap: 'wrap' }}>
-        <button 
-          onClick={() => setCurrency('EGP')}
-          style={{
-            padding: '10px 20px',
-            borderRadius: '30px',
-            fontSize: '0.9rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            border: currency === 'EGP' ? '2px solid var(--primary)' : '1px solid var(--border-color)',
-            backgroundColor: currency === 'EGP' ? 'var(--primary)' : 'transparent',
-            color: currency === 'EGP' ? '#ffffff' : 'var(--text-main)',
-            boxShadow: currency === 'EGP' ? '0 4px 12px rgba(47, 93, 170, 0.2)' : 'none',
-            fontFamily: 'var(--font-ar)'
-          }}
-        >
-          🇪🇬 {lang === 'ar' ? 'جنيه مصري' : 'EGP'}
-        </button>
-        <button 
-          onClick={() => setCurrency('USD')}
-          style={{
-            padding: '10px 20px',
-            borderRadius: '30px',
-            fontSize: '0.9rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            border: currency === 'USD' ? '2px solid var(--primary)' : '1px solid var(--border-color)',
-            backgroundColor: currency === 'USD' ? 'var(--primary)' : 'transparent',
-            color: currency === 'USD' ? '#ffffff' : 'var(--text-main)',
-            boxShadow: currency === 'USD' ? '0 4px 12px rgba(47, 93, 170, 0.2)' : 'none',
-            fontFamily: 'var(--font-en)'
-          }}
-        >
-          🇺🇸 {lang === 'ar' ? 'دولار أمريكي' : 'USD'}
-        </button>
-        <button 
-          onClick={() => setCurrency('SAR')}
-          style={{
-            padding: '10px 20px',
-            borderRadius: '30px',
-            fontSize: '0.9rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            border: currency === 'SAR' ? '2px solid var(--primary)' : '1px solid var(--border-color)',
-            backgroundColor: currency === 'SAR' ? 'var(--primary)' : 'transparent',
-            color: currency === 'SAR' ? '#ffffff' : 'var(--text-main)',
-            boxShadow: currency === 'SAR' ? '0 4px 12px rgba(47, 93, 170, 0.2)' : 'none',
-            fontFamily: 'var(--font-ar)'
-          }}
-        >
-          🇸🇦 {lang === 'ar' ? 'ريال سعودي' : 'SAR'}
-        </button>
-      </div>
+
 
       <div className="pricing-grid">
         {/* Trial Plan */}
