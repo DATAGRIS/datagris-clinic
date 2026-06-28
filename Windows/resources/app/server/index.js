@@ -1357,6 +1357,15 @@ app.get('/api/patients/:mobile', async (req, res) => {
   }
 });
 
+app.get('/api/patients/:mobile/visits', async (req, res) => {
+  try {
+    const visits = await db.queryAll('SELECT * FROM visits WHERE patient_mobile = ? ORDER BY id DESC', [req.params.mobile]);
+    res.json(visits);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Add Companion
 app.post('/api/patients/:mobile/companions', async (req, res) => {
   const { companionName, age, chiefComplaint } = req.body;
@@ -1667,6 +1676,15 @@ app.get('/api/visits/:id', async (req, res) => {
     `, [visitId]);
     if (!visit) return res.status(404).json({ error: 'الزيارة غير موجودة' });
     res.json(visit);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/visits/:id/referrals', async (req, res) => {
+  try {
+    const rows = await db.queryAll('SELECT * FROM referrals WHERE visit_id = ?', [req.params.id]);
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2188,7 +2206,7 @@ app.put('/api/visits/:id', async (req, res) => {
 
 // Save Consultation Data (Doctor Action)
 app.put('/api/visits/:id/medical', async (req, res) => {
-  const { examinationNotes, diagnosis, prescription, referral, followUpDays, services, diagnosisAfter, inventoryItems, weight, height, temperature, vitalsJson, checkedPartnerIds, referralNotes } = req.body;
+  const { examinationNotes, diagnosis, prescription, referral, followUpDays, services, diagnosisAfter, inventoryItems, weight, height, temperature, vitalsJson, checkedPartnerIds, partnerNotesMap } = req.body;
   try {
     const visitId = req.params.id;
     
@@ -2274,7 +2292,6 @@ app.put('/api/visits/:id/medical', async (req, res) => {
         }
         
         let clinicId = visitRow.clinic_id || db.getClinicUserId() || 'CLN-000001';
-        const finalReferralNotes = referralNotes || (referral && referral.text) || '';
 
         for (const partnerId of checkedPartnerIds) {
           const partner = await db.queryOne('SELECT * FROM external_partners WHERE id = ?', [partnerId]);
@@ -2286,6 +2303,8 @@ app.put('/api/visits/:id/medical', async (req, res) => {
               if (partner.type === 'supply') return item.type === 'supply';
               return false;
             });
+
+            const finalReferralNotes = partnerNotesMap && partnerNotesMap[partner.id] !== undefined ? partnerNotesMap[partner.id] : '';
 
             await db.runCommand(
               `INSERT INTO referrals (clinic_id, visit_id, patient_name, partner_id, partner_name, medications_json, supplies_json, notes)
@@ -2312,12 +2331,11 @@ app.put('/api/visits/:id/medical', async (req, res) => {
                     rawTemplate = `إحالة جديدة للجهة الخارجية: {partnerName}\nاسم المريض: {patientName}\nرقم الملف: {fileNumber}\nالبيان المطلوب:\n{referralDetails}`;
                   }
                   
-                  const detailsText = medsForPartner.map((m, i) => `${i+1}. ${m.name} ${m.dosage ? `- ${m.dosage}` : ''} ${m.duration ? `(${m.duration})` : ''}`).join('\n');
                   const message = rawTemplate
                     .replace(/{partnerName}/g, partner.name || '')
                     .replace(/{patientName}/g, patientName || '')
                     .replace(/{fileNumber}/g, fileNumber || '')
-                    .replace(/{referralDetails}/g, detailsText || finalReferralNotes || '');
+                    .replace(/{referralDetails}/g, finalReferralNotes || '');
 
                   await whatsappService.sendWhatsApp({
                     settings,
@@ -2418,9 +2436,6 @@ let lastPayrollRunDate = null;
 
 async function syncReceptionistsAndProcessPayroll() {
   const todayDateStr = new Date().toISOString().split('T')[0];
-  if (lastPayrollRunDate === todayDateStr) {
-    return;
-  }
   try {
     // 1. Sync users with role 'receptionist' to employees table
     const users = await db.queryAll("SELECT username, full_name FROM users WHERE role = 'receptionist'");
@@ -2437,8 +2452,14 @@ async function syncReceptionistsAndProcessPayroll() {
         }
       }
     }
+  } catch (err) {
+    console.error('Error syncing receptionists:', err);
+  }
 
-    // 2. Process payroll payments automatically on their due days
+  if (lastPayrollRunDate === todayDateStr) {
+    return;
+  }
+  try {
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = String(today.getMonth() + 1).padStart(2, '0');
@@ -2495,6 +2516,7 @@ async function syncReceptionistsAndProcessPayroll() {
         );
       }
     }
+    lastPayrollRunDate = todayDateStr;
   } catch (err) {
     console.error('Error in syncReceptionistsAndProcessPayroll:', err);
   }
@@ -2524,7 +2546,7 @@ app.get('/api/employees', async (req, res) => {
       } else {
         emp.commission_earned = 0;
       }
-      emp.total_salary = emp.base_salary + emp.bonus + emp.incentive + emp.commission_earned;
+      emp.total_salary = Math.max(0, emp.base_salary + emp.bonus + emp.incentive + emp.commission_earned - (emp.advance_payment || 0));
     }
     
     res.json(list);
@@ -2547,13 +2569,13 @@ app.post('/api/employees', async (req, res) => {
 });
 
 app.put('/api/employees/:id', async (req, res) => {
-  const { name, role, baseSalary, bonus, incentive, commissionPercentage, salaryDay } = req.body;
+  const { name, role, baseSalary, bonus, incentive, commissionPercentage, salaryDay, payCycle } = req.body;
   try {
     const oldEmp = await db.queryOne('SELECT * FROM employees WHERE id = ?', [req.params.id]);
     await db.runCommand(
-      `UPDATE employees SET name = ?, role = ?, base_salary = ?, bonus = ?, incentive = ?, commission_percentage = ?, salary_day = ?
+      `UPDATE employees SET name = ?, role = ?, base_salary = ?, bonus = ?, incentive = ?, commission_percentage = ?, salary_day = ?, pay_cycle = ?
        WHERE id = ?`,
-      [name, role, baseSalary, bonus || 0, incentive || 0, commissionPercentage || 0, salaryDay || 30, req.params.id]
+      [name, role, baseSalary, bonus || 0, incentive || 0, commissionPercentage || 0, salaryDay || 30, payCycle || 'monthly', req.params.id]
     );
 
     const addedAmount = (bonus || 0) - (oldEmp ? (oldEmp.bonus || 0) : 0);
@@ -2576,6 +2598,118 @@ app.delete('/api/employees/:id', async (req, res) => {
   try {
     await db.runCommand('DELETE FROM employees WHERE id = ?', [req.params.id]);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Employee Salary Advance
+app.post('/api/employees/:id/advance', async (req, res) => {
+  const { amount, notes, userResponsible } = req.body;
+  try {
+    const activeSession = await getActiveTreasurySession();
+    if (!activeSession) {
+      return res.status(400).json({ error: 'الخزينة مغلقة! يرجى فتح الخزينة أولاً لتسجيل السلف والمصروفات.' });
+    }
+    const empId = req.params.id;
+    const emp = await db.queryOne('SELECT * FROM employees WHERE id = ?', [empId]);
+    if (!emp) return res.status(404).json({ error: 'الموظف غير موجود' });
+
+    const advAmt = parseFloat(amount || 0);
+    if (advAmt <= 0) return res.status(400).json({ error: 'يرجى إدخال مبلغ سلفة صحيح' });
+
+    await db.runCommand(
+      'UPDATE employees SET advance_payment = advance_payment + ? WHERE id = ?',
+      [advAmt, empId]
+    );
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const timeStr = new Date().toTimeString().split(' ')[0];
+    const desc = `سلفة راتب (استلاف) للموظف: ${emp.name} (${notes || ''})`;
+    
+    await db.runCommand(
+      'INSERT INTO vouchers (type, amount, recipient_payer, description) VALUES (?, ?, ?, ?)',
+      ['payment', advAmt, emp.name, desc]
+    );
+
+    await addTreasuryTransaction({
+      type: 'expense',
+      amount: advAmt,
+      description: desc,
+      userResponsible: userResponsible || 'admin',
+      date: todayStr,
+      time: timeStr
+    });
+
+    await db.logAudit(1, userResponsible || 'admin', 'EMPLOYEE_ADVANCE', `Issued advance payment of ${advAmt} EGP for ${emp.name}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Employee Salary payout & reset
+app.post('/api/employees/:id/payout', async (req, res) => {
+  const { userResponsible } = req.body;
+  try {
+    const activeSession = await getActiveTreasurySession();
+    if (!activeSession) {
+      return res.status(400).json({ error: 'الخزينة مغلقة! يرجى فتح الخزينة أولاً لإتمام صرف الرواتب.' });
+    }
+    const empId = req.params.id;
+    const emp = await db.queryOne('SELECT * FROM employees WHERE id = ?', [empId]);
+    if (!emp) return res.status(404).json({ error: 'الموظف غير موجود' });
+
+    let commissionEarned = 0;
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = String(today.getMonth() + 1).padStart(2, '0');
+    const currentMonthStr = `${currentYear}-${currentMonth}`;
+    const startOfMonth = `${currentYear}-${currentMonth}-01 00:00:00`;
+
+    if (emp.commission_percentage > 0) {
+      const revenueResult = await db.queryOne(`
+        SELECT SUM(paid_amount) as total 
+        FROM visits 
+        WHERE status = 'closed' AND created_at >= ?
+      `, [startOfMonth]);
+      const totalRev = revenueResult ? (revenueResult.total || 0) : 0;
+      commissionEarned = (totalRev * emp.commission_percentage) / 100;
+    }
+
+    const base = emp.base_salary || 0;
+    const bonus = emp.bonus || 0;
+    const incentive = emp.incentive || 0;
+    const advance = emp.advance_payment || 0;
+    const netPayout = Math.max(0, base + bonus + incentive + commissionEarned - advance);
+
+    if (netPayout > 0) {
+      const desc = `صرف الراتب والعمولات للموظف: ${emp.name} (الأساسي: ${base}، مكافآت: ${bonus}، حوافز: ${incentive}، عمولة: ${commissionEarned.toFixed(2)}، سلفة مخصومة: ${advance})`;
+      const todayStr = today.toISOString().split('T')[0];
+      const timeStr = today.toTimeString().split(' ')[0];
+
+      await db.runCommand(
+        'INSERT INTO vouchers (type, amount, recipient_payer, description) VALUES (?, ?, ?, ?)',
+        ['payment', netPayout, emp.name, desc]
+      );
+
+      await addTreasuryTransaction({
+        type: 'expense',
+        amount: netPayout,
+        description: desc,
+        userResponsible: userResponsible || 'admin',
+        date: todayStr,
+        time: timeStr
+      });
+    }
+
+    await db.runCommand(
+      'UPDATE employees SET last_paid_month = ?, bonus = 0, incentive = 0, advance_payment = 0 WHERE id = ?',
+      [currentMonthStr, empId]
+    );
+
+    await db.logAudit(1, userResponsible || 'admin', 'EMPLOYEE_PAYROLL_PAID', `Paid salary & commission for ${emp.name} (Net payout: ${netPayout} EGP)`);
+    res.json({ success: true, netPayout });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

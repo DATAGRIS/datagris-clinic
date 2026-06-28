@@ -136,6 +136,13 @@ async function configurePostgresDefaults(client) {
     }
   }
 
+  try {
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS pay_cycle TEXT DEFAULT \'monthly\'');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS advance_payment DOUBLE PRECISION DEFAULT 0');
+  } catch (e) {
+    console.warn(`Failed to alter Postgres employees table: ${e.message}`);
+  }
+
   // Reset PostgreSQL sequences to match actual max values (avoid constraint duplicates on insert)
   const tablesWithSerialIds = [
     'companions', 'medical_services', 'visits', 'employees', 'inventory_items', 
@@ -736,6 +743,8 @@ function runMigrationsSQLite() {
     'ALTER TABLE employees ADD COLUMN username TEXT',
     'ALTER TABLE employees ADD COLUMN salary_day INTEGER DEFAULT 30',
     'ALTER TABLE employees ADD COLUMN last_paid_month TEXT',
+    'ALTER TABLE employees ADD COLUMN pay_cycle TEXT DEFAULT "monthly"',
+    'ALTER TABLE employees ADD COLUMN advance_payment REAL DEFAULT 0',
     'ALTER TABLE visits ADD COLUMN inventory_deducted INTEGER DEFAULT 0',
     'ALTER TABLE inventory_items ADD COLUMN category TEXT',
     'ALTER TABLE inventory_items ADD COLUMN item_type TEXT DEFAULT "quantity"',
@@ -1183,6 +1192,8 @@ async function runMigrationsMySQL() {
       'ALTER TABLE employees ADD COLUMN username VARCHAR(255) NULL',
       'ALTER TABLE employees ADD COLUMN salary_day INT DEFAULT 30',
       'ALTER TABLE employees ADD COLUMN last_paid_month VARCHAR(50) NULL',
+      'ALTER TABLE employees ADD COLUMN pay_cycle VARCHAR(50) DEFAULT \'monthly\'',
+      'ALTER TABLE employees ADD COLUMN advance_payment DOUBLE DEFAULT 0',
       'ALTER TABLE visits ADD COLUMN inventory_deducted INT DEFAULT 0',
       'ALTER TABLE inventory_items ADD COLUMN category VARCHAR(255) NULL',
       'ALTER TABLE inventory_items ADD COLUMN item_type VARCHAR(100) DEFAULT \'quantity\'',
