@@ -1243,6 +1243,18 @@ app.get('/api/patients', async (req, res) => {
 app.post('/api/patients', async (req, res) => {
   const { mobileNumber, name, gender, age, weight, height, temperature, chiefComplaint, medicalHistory, whatsappEnabled, vitalsJson } = req.body;
   try {
+    // Resolve clinic_id from env var or authenticated user's profile
+    let clinicId = process.env.CLINIC_ID || '';
+    if (!clinicId) {
+      const activeUserId = db.getRequestUserId();
+      if (activeUserId) {
+        const userProfile = await db.queryOne('SELECT clinic_id FROM profiles WHERE id = ?', [activeUserId]);
+        if (userProfile) {
+          clinicId = userProfile.clinic_id;
+        }
+      }
+    }
+
     let mobileNumberToUse = mobileNumber ? String(mobileNumber).trim() : '';
     if (!mobileNumberToUse || mobileNumberToUse === '0' || mobileNumberToUse.toLowerCase() === 'none') {
       mobileNumberToUse = 'TEMP-' + Date.now() + '-' + Math.floor(1000 + Math.random() * 9000);
@@ -1289,10 +1301,10 @@ app.post('/api/patients', async (req, res) => {
 
       // Create new
       await db.runCommand(
-        `INSERT INTO patients (mobile_number, name, gender, age, weight, height, temperature, chief_complaint, medical_history_json, file_number, registration_date, registration_time, whatsapp_enabled, vitals_json) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO patients (clinic_id, mobile_number, name, gender, age, weight, height, temperature, chief_complaint, medical_history_json, file_number, registration_date, registration_time, whatsapp_enabled, vitals_json) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          mobileNumberToUse, name, gender, age, weight, height, temperature, chiefComplaint, 
+          clinicId, mobileNumberToUse, name, gender, age, weight, height, temperature, chiefComplaint, 
           JSON.stringify(medicalHistory || {}), fileNumber, todayStr, timeStr, wsEnabled, vitalsJson || null
         ]
       );
