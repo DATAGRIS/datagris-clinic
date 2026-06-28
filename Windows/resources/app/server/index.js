@@ -170,7 +170,21 @@ async function getSystemSettings() {
       const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
       let logoRow;
       if (isPostgres) {
-        logoRow = await db.queryOne("SELECT logo_data FROM clinic_logos WHERE clinic_id = ?", [db.getClinicUserId() || 'CLN-000001']);
+        let activeClinicId = null;
+        const activeUserId = db.getRequestUserId();
+        if (activeUserId) {
+          const userProfile = await db.queryOne('SELECT clinic_id FROM profiles WHERE id = ?', [activeUserId]);
+          if (userProfile) {
+            activeClinicId = userProfile.clinic_id;
+          }
+        }
+        if (!activeClinicId) {
+          const fallbackProfile = await db.queryOne('SELECT clinic_id FROM profiles LIMIT 1');
+          if (fallbackProfile) {
+            activeClinicId = fallbackProfile.clinic_id;
+          }
+        }
+        logoRow = await db.queryOne("SELECT logo_data FROM clinic_logos WHERE clinic_id = ?", [activeClinicId || 'CLN-000001']);
       } else {
         logoRow = await db.queryOne("SELECT logo_data FROM clinic_logos LIMIT 1");
       }
@@ -726,9 +740,20 @@ app.post('/api/settings', async (req, res) => {
         );
         if (key === 'clinicLogo') {
           try {
+            let activeClinicId = null;
+            const activeUserId = db.getRequestUserId();
+            if (activeUserId) {
+              const userProfile = await db.queryOne('SELECT clinic_id FROM profiles WHERE id = ?', [activeUserId]);
+              if (userProfile) {
+                activeClinicId = userProfile.clinic_id;
+              }
+            }
+            if (!activeClinicId) {
+              activeClinicId = 'CLN-000001';
+            }
             await db.runCommand(
               'INSERT INTO clinic_logos (clinic_id, logo_data) VALUES (?, ?) ON CONFLICT (clinic_id) DO UPDATE SET logo_data = EXCLUDED.logo_data',
-              [db.getClinicUserId() || 'CLN-000001', valueToStore]
+              [activeClinicId, valueToStore]
             );
           } catch (logoErr) {
             console.error('Failed to store in clinic_logos:', logoErr);
@@ -2163,7 +2188,7 @@ app.put('/api/visits/:id', async (req, res) => {
 
 // Save Consultation Data (Doctor Action)
 app.put('/api/visits/:id/medical', async (req, res) => {
-  const { examinationNotes, diagnosis, prescription, referral, followUpDays, services, diagnosisAfter, inventoryItems, weight, height, temperature, vitalsJson } = req.body;
+  const { examinationNotes, diagnosis, prescription, referral, followUpDays, services, diagnosisAfter, inventoryItems, weight, height, temperature, vitalsJson, checkedPartnerIds, referralNotes } = req.body;
   try {
     const visitId = req.params.id;
     
@@ -2229,6 +2254,85 @@ app.put('/api/visits/:id/medical', async (req, res) => {
           'INSERT INTO visit_inventory_items (visit_id, item_id, item_name, quantity, price, billable) VALUES (?, ?, ?, ?, ?, ?)',
           [visitId, item.id, item.name, item.quantity, parseFloat(item.price || 0), isBill]
         );
+      }
+    }
+
+    // Dynamic Referral Partners synchronization (Step 3)
+    if (checkedPartnerIds !== undefined) {
+      await db.runCommand('DELETE FROM referrals WHERE visit_id = ?', [visitId]);
+      
+      const visitRow = await db.queryOne('SELECT * FROM visits WHERE id = ?', [visitId]);
+      if (visitRow) {
+        let patientName = visitRow.patient_name || '';
+        let fileNumber = '';
+        if (visitRow.patient_mobile) {
+          const patientRow = await db.queryOne("SELECT name, file_number FROM patients WHERE mobile_number = ?", [visitRow.patient_mobile]);
+          if (patientRow) {
+            patientName = patientRow.name;
+            fileNumber = patientRow.file_number;
+          }
+        }
+        
+        let clinicId = visitRow.clinic_id || db.getClinicUserId() || 'CLN-000001';
+        const finalReferralNotes = referralNotes || (referral && referral.text) || '';
+
+        for (const partnerId of checkedPartnerIds) {
+          const partner = await db.queryOne('SELECT * FROM external_partners WHERE id = ?', [partnerId]);
+          if (partner) {
+            const medsForPartner = (prescription || []).filter(item => {
+              if (partner.type === 'pharmacy') return item.type === 'medicine';
+              if (partner.type === 'scan') return item.type === 'scan';
+              if (partner.type === 'lab') return item.type === 'lab';
+              if (partner.type === 'supply') return item.type === 'supply';
+              return false;
+            });
+
+            await db.runCommand(
+              `INSERT INTO referrals (clinic_id, visit_id, patient_name, partner_id, partner_name, medications_json, supplies_json, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                clinicId,
+                visitId,
+                patientName,
+                partner.id,
+                partner.name,
+                JSON.stringify(medsForPartner),
+                JSON.stringify([]),
+                finalReferralNotes
+              ]
+            );
+
+            // WhatsApp notifications
+            try {
+              if (partner.phone) {
+                const settings = await getSystemSettings();
+                if (settings.whatsappEnabled === 'true') {
+                  let rawTemplate = settings.whatsappTemplateReferral;
+                  if (!rawTemplate) {
+                    rawTemplate = `إحالة جديدة للجهة الخارجية: {partnerName}\nاسم المريض: {patientName}\nرقم الملف: {fileNumber}\nالبيان المطلوب:\n{referralDetails}`;
+                  }
+                  
+                  const detailsText = medsForPartner.map((m, i) => `${i+1}. ${m.name} ${m.dosage ? `- ${m.dosage}` : ''} ${m.duration ? `(${m.duration})` : ''}`).join('\n');
+                  const message = rawTemplate
+                    .replace(/{partnerName}/g, partner.name || '')
+                    .replace(/{patientName}/g, patientName || '')
+                    .replace(/{fileNumber}/g, fileNumber || '')
+                    .replace(/{referralDetails}/g, detailsText || finalReferralNotes || '');
+
+                  await whatsappService.sendWhatsApp({
+                    settings,
+                    to: partner.phone,
+                    messageType: 'broadcast',
+                    customText: message,
+                    clinicId
+                  });
+                }
+              }
+            } catch (wsErr) {
+              console.error('WhatsApp referral send error:', wsErr);
+            }
+          }
+        }
       }
     }
 
@@ -2310,7 +2414,13 @@ app.delete('/api/services/:id', async (req, res) => {
   }
 });
 
+let lastPayrollRunDate = null;
+
 async function syncReceptionistsAndProcessPayroll() {
+  const todayDateStr = new Date().toISOString().split('T')[0];
+  if (lastPayrollRunDate === todayDateStr) {
+    return;
+  }
   try {
     // 1. Sync users with role 'receptionist' to employees table
     const users = await db.queryAll("SELECT username, full_name FROM users WHERE role = 'receptionist'");
@@ -2972,7 +3082,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
       monthlyGroups[month].expenses += p.amount;
     });
 
-    const monthlyTimeline = Object.values(monthlyGroups).sort((a,b) => b.month.localeCompare(a.month)).slice(0, 6);
+    const monthlyTimeline = Object.values(monthlyGroups).sort((a,b) => b.month.localeCompare(a.month)).slice(0, 12);
 
     res.json({
       revenue: {
