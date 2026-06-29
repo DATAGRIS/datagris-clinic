@@ -139,6 +139,7 @@ async function configurePostgresDefaults(client) {
   try {
     await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS pay_cycle TEXT DEFAULT \'monthly\'');
     await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS advance_payment DOUBLE PRECISION DEFAULT 0');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS last_paid_date VARCHAR(50)');
   } catch (e) {
     console.warn(`Failed to alter Postgres employees table: ${e.message}`);
   }
@@ -253,6 +254,9 @@ function translateSqlToPostgres(sql) {
       }
     }
   }
+
+  // Translate created_at LIKE to created_at::text LIKE for Postgres timestamp type compatibility
+  translated = translated.replace(/created_at LIKE/g, 'created_at::text LIKE');
 
   // Replace SQLite/MySQL '?' placeholder with Postgres '$1, $2'
   let index = 1;
@@ -374,26 +378,66 @@ async function runCommand(sql, params = []) {
     try {
       await client.query('BEGIN');
       const activeUserId = getRequestUserId() || clinicUserId;
+      let activeClinicId = null;
       if (activeUserId) {
         await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
         await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
         await client.query(`SET LOCAL ROLE authenticated`);
+        
+        // Fetch user's clinic_id for RLS insert injection
+        const profileRow = await client.query('SELECT clinic_id FROM profiles WHERE id = $1', [activeUserId]);
+        if (profileRow.rows[0]) {
+          activeClinicId = profileRow.rows[0].clinic_id;
+        }
       }
-      const pgSql = translateSqlToPostgres(sql);
-      let finalSql = pgSql;
+      
+      if (!activeClinicId) {
+        activeClinicId = process.env.CLINIC_ID || 'CLN-000001';
+      }
+
+      let finalSql = sql;
+      let finalParams = [...cleanParams];
+
+      // Auto-inject clinic_id if missing for Postgres INSERTs targeting RLS tables
+      if (sql.trim().toUpperCase().startsWith('INSERT INTO')) {
+        const insertMatch = sql.trim().match(/^INSERT\s+INTO\s+["']?([a-zA-Z0-9_]+)["']?\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
+        if (insertMatch) {
+          const tableName = insertMatch[1].toLowerCase();
+          const colsStr = insertMatch[2];
+          const cols = colsStr.split(',').map(c => c.trim().replace(/["']/g, ''));
+          
+          const rlsTables = [
+            'vouchers', 'treasury_sessions', 'treasury_transactions', 'treasury_expenses',
+            'employees', 'inventory_items', 'maintenance_records', 'audit_logs',
+            'examination_templates', 'refunds', 'external_partners', 'referrals',
+            'chat_messages', 'inventory_transactions', 'visit_inventory_items',
+            'whatsapp_logs', 'notifications', 'reports', 'patients', 'visits'
+          ];
+
+          if (rlsTables.includes(tableName) && !cols.includes('clinic_id')) {
+            const newCols = `clinic_id, ${colsStr}`;
+            const newVals = `?, ${insertMatch[3]}`;
+            finalSql = sql.replace(/\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i, `(${newCols}) VALUES (${newVals})`);
+            finalParams.unshift(activeClinicId);
+          }
+        }
+      }
+
+      const pgSql = translateSqlToPostgres(finalSql);
+      let returningSql = pgSql;
       if (pgSql.trim().toUpperCase().startsWith('INSERT INTO')) {
         if (!pgSql.toUpperCase().includes('RETURNING')) {
           const match = pgSql.match(/INSERT\s+INTO\s+["']?([a-zA-Z0-9_]+)["']?/i);
           const tableName = match ? match[1].toLowerCase() : '';
           const noIdTables = ['patients', 'settings', 'visit_services'];
           if (noIdTables.includes(tableName)) {
-            finalSql = pgSql.trim().replace(/;?$/, ' RETURNING *');
+            returningSql = pgSql.trim().replace(/;?$/, ' RETURNING *');
           } else {
-            finalSql = pgSql.trim().replace(/;?$/, ' RETURNING id');
+            returningSql = pgSql.trim().replace(/;?$/, ' RETURNING id');
           }
         }
       }
-      const result = await client.query(finalSql, cleanParams);
+      const result = await client.query(returningSql, finalParams);
       await client.query('COMMIT');
       return {
         changes: result.rowCount || 0,
@@ -745,6 +789,7 @@ function runMigrationsSQLite() {
     'ALTER TABLE employees ADD COLUMN last_paid_month TEXT',
     'ALTER TABLE employees ADD COLUMN pay_cycle TEXT DEFAULT "monthly"',
     'ALTER TABLE employees ADD COLUMN advance_payment REAL DEFAULT 0',
+    'ALTER TABLE employees ADD COLUMN last_paid_date TEXT',
     'ALTER TABLE visits ADD COLUMN inventory_deducted INTEGER DEFAULT 0',
     'ALTER TABLE inventory_items ADD COLUMN category TEXT',
     'ALTER TABLE inventory_items ADD COLUMN item_type TEXT DEFAULT "quantity"',
@@ -1194,6 +1239,7 @@ async function runMigrationsMySQL() {
       'ALTER TABLE employees ADD COLUMN last_paid_month VARCHAR(50) NULL',
       'ALTER TABLE employees ADD COLUMN pay_cycle VARCHAR(50) DEFAULT \'monthly\'',
       'ALTER TABLE employees ADD COLUMN advance_payment DOUBLE DEFAULT 0',
+      'ALTER TABLE employees ADD COLUMN last_paid_date VARCHAR(50) NULL',
       'ALTER TABLE visits ADD COLUMN inventory_deducted INT DEFAULT 0',
       'ALTER TABLE inventory_items ADD COLUMN category VARCHAR(255) NULL',
       'ALTER TABLE inventory_items ADD COLUMN item_type VARCHAR(100) DEFAULT \'quantity\'',

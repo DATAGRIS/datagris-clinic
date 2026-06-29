@@ -1243,18 +1243,6 @@ app.get('/api/patients', async (req, res) => {
 app.post('/api/patients', async (req, res) => {
   const { mobileNumber, name, gender, age, weight, height, temperature, chiefComplaint, medicalHistory, whatsappEnabled, vitalsJson } = req.body;
   try {
-    // Resolve clinic_id from env var or authenticated user's profile
-    let clinicId = process.env.CLINIC_ID || '';
-    if (!clinicId) {
-      const activeUserId = db.getRequestUserId();
-      if (activeUserId) {
-        const userProfile = await db.queryOne('SELECT clinic_id FROM profiles WHERE id = ?', [activeUserId]);
-        if (userProfile) {
-          clinicId = userProfile.clinic_id;
-        }
-      }
-    }
-
     let mobileNumberToUse = mobileNumber ? String(mobileNumber).trim() : '';
     if (!mobileNumberToUse || mobileNumberToUse === '0' || mobileNumberToUse.toLowerCase() === 'none') {
       mobileNumberToUse = 'TEMP-' + Date.now() + '-' + Math.floor(1000 + Math.random() * 9000);
@@ -1301,10 +1289,10 @@ app.post('/api/patients', async (req, res) => {
 
       // Create new
       await db.runCommand(
-        `INSERT INTO patients (clinic_id, mobile_number, name, gender, age, weight, height, temperature, chief_complaint, medical_history_json, file_number, registration_date, registration_time, whatsapp_enabled, vitals_json) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO patients (mobile_number, name, gender, age, weight, height, temperature, chief_complaint, medical_history_json, file_number, registration_date, registration_time, whatsapp_enabled, vitals_json) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          clinicId, mobileNumberToUse, name, gender, age, weight, height, temperature, chiefComplaint, 
+          mobileNumberToUse, name, gender, age, weight, height, temperature, chiefComplaint, 
           JSON.stringify(medicalHistory || {}), fileNumber, todayStr, timeStr, wsEnabled, vitalsJson || null
         ]
       );
@@ -2449,23 +2437,28 @@ let lastPayrollRunDate = null;
 async function syncReceptionistsAndProcessPayroll() {
   const todayDateStr = new Date().toISOString().split('T')[0];
   try {
-    // 1. Sync users with role 'receptionist' to employees table
-    const users = await db.queryAll("SELECT username, full_name FROM users WHERE role = 'receptionist'");
+    // 1. Sync users with role receptionist, nurse, assistant, other to employees table
+    const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+    const usersQuery = isPostgres 
+      ? "SELECT username, full_name, role FROM profiles WHERE role IN ('receptionist', 'nurse', 'assistant', 'other')"
+      : "SELECT username, full_name, role FROM users WHERE role IN ('receptionist', 'nurse', 'assistant', 'other')";
+    const users = await db.queryAll(usersQuery);
+    
     for (const user of users) {
       const existing = await db.queryOne("SELECT * FROM employees WHERE username = ?", [user.username]);
       if (!existing) {
         await db.runCommand(
-          "INSERT INTO employees (name, role, username, base_salary, salary_day, last_paid_month) VALUES (?, 'receptionist', ?, 0, 30, NULL)",
-          [user.full_name, user.username]
+          "INSERT INTO employees (name, role, username, base_salary, salary_day, pay_cycle, last_paid_month, last_paid_date) VALUES (?, ?, ?, 3000, 30, 'monthly', NULL, ?)",
+          [user.full_name, user.role, user.username, todayDateStr]
         );
       } else {
-        if (existing.name !== user.full_name) {
-          await db.runCommand("UPDATE employees SET name = ? WHERE id = ?", [user.full_name, existing.id]);
+        if (existing.name !== user.full_name || existing.role !== user.role) {
+          await db.runCommand("UPDATE employees SET name = ?, role = ? WHERE id = ?", [user.full_name, user.role, existing.id]);
         }
       }
     }
   } catch (err) {
-    console.error('Error syncing receptionists:', err);
+    console.error('Error syncing staff users:', err);
   }
 
   if (lastPayrollRunDate === todayDateStr) {
@@ -2479,31 +2472,62 @@ async function syncReceptionistsAndProcessPayroll() {
     const currentDay = today.getDate();
     const daysInMonth = new Date(currentYear, today.getMonth() + 1, 0).getDate();
 
-    // Find all employees with a base salary and set salary day
-    const employeesList = await db.queryAll("SELECT * FROM employees WHERE base_salary > 0 AND salary_day IS NOT NULL");
+    // Find all employees with a base salary
+    const employeesList = await db.queryAll("SELECT * FROM employees WHERE base_salary > 0");
     for (const emp of employeesList) {
-      const isDue = currentDay >= Math.min(emp.salary_day, daysInMonth);
-      const isPaidThisMonth = emp.last_paid_month === currentMonthStr;
-      
-      if (isDue && !isPaidThisMonth) {
-        // Calculate current month's commission if any
+      const cycle = emp.pay_cycle || 'monthly';
+      let isDue = false;
+
+      if (cycle === 'daily') {
+        isDue = true;
+      } else if (cycle === 'weekly') {
+        let lastPaid = emp.last_paid_date ? new Date(emp.last_paid_date) : null;
+        if (!lastPaid) {
+          isDue = true;
+        } else {
+          const diffDays = (today - lastPaid) / (1000 * 60 * 60 * 24);
+          if (diffDays >= 7) isDue = true;
+        }
+      } else if (cycle === 'biweekly') {
+        let lastPaid = emp.last_paid_date ? new Date(emp.last_paid_date) : null;
+        if (!lastPaid) {
+          isDue = true;
+        } else {
+          const diffDays = (today - lastPaid) / (1000 * 60 * 60 * 24);
+          if (diffDays >= 14) isDue = true;
+        }
+      } else {
+        // monthly: due if currentDay >= targetDay (up to daysInMonth)
+        const targetDay = Math.min(emp.salary_day || 30, daysInMonth);
+        isDue = currentDay >= targetDay && emp.last_paid_month !== currentMonthStr;
+      }
+
+      if (isDue) {
+        // Calculate current period's commission if any
         let commissionEarned = 0;
         if (emp.commission_percentage > 0) {
-          const startOfMonth = `${currentYear}-${currentMonth}-01 00:00:00`;
+          const startOfPeriod = emp.last_paid_date 
+            ? `${emp.last_paid_date} 00:00:00`
+            : `${currentYear}-${currentMonth}-01 00:00:00`;
+            
           const revenueResult = await db.queryOne(`
             SELECT SUM(paid_amount) as total 
             FROM visits 
             WHERE status = 'closed' AND created_at >= ?
-          `, [startOfMonth]);
+          `, [startOfPeriod]);
           const totalRev = revenueResult ? (revenueResult.total || 0) : 0;
           commissionEarned = (totalRev * emp.commission_percentage) / 100;
         }
 
-        const totalPayout = emp.base_salary + (emp.bonus || 0) + (emp.incentive || 0) + commissionEarned;
+        const base = emp.base_salary || 0;
+        const bonus = emp.bonus || 0;
+        const incentive = emp.incentive || 0;
+        const advance = emp.advance_payment || 0;
+        const totalPayout = Math.max(0, base + bonus + incentive + commissionEarned - advance);
 
         if (totalPayout > 0) {
           // Record payment voucher (expenditure / cash out)
-          const desc = `صرف راتب شهري تلقائي للموظف ${emp.name} عن شهر ${currentMonthStr} (الأساسي: ${emp.base_salary}، مكافآت: ${emp.bonus || 0}، حوافز: ${emp.incentive || 0}، عمولة: ${commissionEarned.toFixed(2)})`;
+          const desc = `صرف راتب تلقائي (${cycle === 'daily' ? 'يومي' : cycle === 'weekly' ? 'أسبوعي' : cycle === 'biweekly' ? 'كل أسبوعين' : 'شهري'}) للموظف ${emp.name} (الأساسي: ${base}، مكافآت: ${bonus}، حوافز: ${incentive}، عمولة: ${commissionEarned.toFixed(2)}، سلفة مخصومة: ${advance})`;
           await db.runCommand(
             "INSERT INTO vouchers (type, amount, recipient_payer, description) VALUES ('payment', ?, ?, ?)",
             [totalPayout, emp.name, desc]
@@ -2512,7 +2536,7 @@ async function syncReceptionistsAndProcessPayroll() {
           // Log in treasury transactions as expense
           await addTreasuryTransaction({
             type: 'expense',
-            amount: parseFloat(totalPayout),
+            amount: totalPayout,
             description: desc,
             userResponsible: 'system'
           });
@@ -2521,10 +2545,10 @@ async function syncReceptionistsAndProcessPayroll() {
           await db.logAudit(1, 'system', 'AUTO_PAYROLL_PAYMENT', `Automatically processed salary payment of ${totalPayout} EGP for ${emp.name}`);
         }
 
-        // Mark as paid and reset temporary bonuses and incentives for next month
+        // Mark as paid and reset temporary bonuses and incentives for next month/period
         await db.runCommand(
-          "UPDATE employees SET last_paid_month = ?, bonus = 0, incentive = 0 WHERE id = ?",
-          [currentMonthStr, emp.id]
+          "UPDATE employees SET last_paid_month = ?, last_paid_date = ?, bonus = 0, incentive = 0, advance_payment = 0 WHERE id = ?",
+          [currentMonthStr, todayDateStr, emp.id]
         );
       }
     }
@@ -2716,8 +2740,8 @@ app.post('/api/employees/:id/payout', async (req, res) => {
     }
 
     await db.runCommand(
-      'UPDATE employees SET last_paid_month = ?, bonus = 0, incentive = 0, advance_payment = 0 WHERE id = ?',
-      [currentMonthStr, empId]
+      'UPDATE employees SET last_paid_month = ?, last_paid_date = ?, bonus = 0, incentive = 0, advance_payment = 0 WHERE id = ?',
+      [currentMonthStr, today.toISOString().split('T')[0], empId]
     );
 
     await db.logAudit(1, userResponsible || 'admin', 'EMPLOYEE_PAYROLL_PAID', `Paid salary & commission for ${emp.name} (Net payout: ${netPayout} EGP)`);

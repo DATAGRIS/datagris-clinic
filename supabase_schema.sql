@@ -160,7 +160,10 @@ CREATE TABLE IF NOT EXISTS employees (
     commission_percentage DOUBLE PRECISION DEFAULT 0,
     username VARCHAR(255),
     salary_day INT DEFAULT 30,
-    last_paid_month VARCHAR(50)
+    last_paid_month VARCHAR(50),
+    pay_cycle VARCHAR(50) DEFAULT 'monthly',
+    advance_payment DOUBLE PRECISION DEFAULT 0,
+    last_paid_date VARCHAR(50)
 );
 
 -- 11. Inventory items
