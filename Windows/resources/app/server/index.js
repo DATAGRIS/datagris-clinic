@@ -414,7 +414,7 @@ app.get('/api/treasury/status', async (req, res) => {
 
 // Open daily treasury
 app.post('/api/treasury/open', async (req, res) => {
-  const { openingBalance, notes, userOpening } = req.body;
+  const { openingBalance, notes, userOpening, shiftType } = req.body;
   try {
     const active = await getActiveTreasurySession();
     if (active) {
@@ -426,9 +426,9 @@ app.post('/api/treasury/open', async (req, res) => {
     
     const result = await db.runCommand(
       `INSERT INTO treasury_sessions (
-        opening_date, opening_time, opening_balance, opening_user, status, notes
-      ) VALUES (?, ?, ?, ?, 'open', ?)`,
-      [todayStr, timeStr, parseFloat(openingBalance || 0), userOpening || 'admin', notes || '']
+        opening_date, opening_time, opening_balance, opening_user, status, notes, shift_type
+      ) VALUES (?, ?, ?, ?, 'open', ?, ?)`,
+      [todayStr, timeStr, parseFloat(openingBalance || 0), userOpening || 'admin', notes || '', shiftType || 'Full Time']
     );
     
     const newSession = await db.queryOne("SELECT * FROM treasury_sessions WHERE id = ?", [result.insertId]);
@@ -2592,11 +2592,16 @@ app.get('/api/employees', async (req, res) => {
 });
 
 app.post('/api/employees', async (req, res) => {
-  const { name, role, baseSalary, commissionPercentage, salaryDay } = req.body;
+  const { name, role, baseSalary, commissionPercentage, salaryDay, age, gender, address, phone, dateOfHire, shiftType } = req.body;
   try {
     await db.runCommand(
-      'INSERT INTO employees (name, role, base_salary, commission_percentage, salary_day) VALUES (?, ?, ?, ?, ?)',
-      [name, role, baseSalary, commissionPercentage || 0, salaryDay || 30]
+      `INSERT INTO employees (name, role, base_salary, commission_percentage, salary_day, age, gender, address, phone, date_of_hire, shift_type) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        name, role, baseSalary, commissionPercentage || 0, salaryDay || 30,
+        age ? parseInt(age) : null, gender || null, address || null, phone || null,
+        dateOfHire || null, shiftType || 'Full Time'
+      ]
     );
     res.json({ success: true });
   } catch (err) {
@@ -2605,13 +2610,18 @@ app.post('/api/employees', async (req, res) => {
 });
 
 app.put('/api/employees/:id', async (req, res) => {
-  const { name, role, baseSalary, bonus, incentive, commissionPercentage, salaryDay, payCycle } = req.body;
+  const { name, role, baseSalary, bonus, incentive, commissionPercentage, salaryDay, payCycle, age, gender, address, phone, dateOfHire, shiftType } = req.body;
   try {
     const oldEmp = await db.queryOne('SELECT * FROM employees WHERE id = ?', [req.params.id]);
     await db.runCommand(
-      `UPDATE employees SET name = ?, role = ?, base_salary = ?, bonus = ?, incentive = ?, commission_percentage = ?, salary_day = ?, pay_cycle = ?
+      `UPDATE employees SET name = ?, role = ?, base_salary = ?, bonus = ?, incentive = ?, commission_percentage = ?, salary_day = ?, pay_cycle = ?,
+       age = ?, gender = ?, address = ?, phone = ?, date_of_hire = ?, shift_type = ?
        WHERE id = ?`,
-      [name, role, baseSalary, bonus || 0, incentive || 0, commissionPercentage || 0, salaryDay || 30, payCycle || 'monthly', req.params.id]
+      [
+        name, role, baseSalary, bonus || 0, incentive || 0, commissionPercentage || 0, salaryDay || 30, payCycle || 'monthly',
+        age ? parseInt(age) : null, gender || null, address || null, phone || null, dateOfHire || null, shiftType || 'Full Time',
+        req.params.id
+      ]
     );
 
     const addedAmount = (bonus || 0) - (oldEmp ? (oldEmp.bonus || 0) : 0);

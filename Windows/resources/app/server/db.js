@@ -140,8 +140,15 @@ async function configurePostgresDefaults(client) {
     await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS pay_cycle TEXT DEFAULT \'monthly\'');
     await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS advance_payment DOUBLE PRECISION DEFAULT 0');
     await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS last_paid_date VARCHAR(50)');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS age INT');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS gender VARCHAR(50)');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS address TEXT');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS phone VARCHAR(50)');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS date_of_hire VARCHAR(50)');
+    await client.query('ALTER TABLE employees ADD COLUMN IF NOT EXISTS shift_type VARCHAR(50)');
+    await client.query('ALTER TABLE treasury_sessions ADD COLUMN IF NOT EXISTS shift_type VARCHAR(50)');
   } catch (e) {
-    console.warn(`Failed to alter Postgres employees table: ${e.message}`);
+    console.warn(`Failed to alter Postgres employees or treasury tables: ${e.message}`);
   }
 
   // Reset PostgreSQL sequences to match actual max values (avoid constraint duplicates on insert)
@@ -791,6 +798,13 @@ function runMigrationsSQLite() {
     'ALTER TABLE employees ADD COLUMN pay_cycle TEXT DEFAULT "monthly"',
     'ALTER TABLE employees ADD COLUMN advance_payment REAL DEFAULT 0',
     'ALTER TABLE employees ADD COLUMN last_paid_date TEXT',
+    'ALTER TABLE employees ADD COLUMN age INTEGER',
+    'ALTER TABLE employees ADD COLUMN gender TEXT',
+    'ALTER TABLE employees ADD COLUMN address TEXT',
+    'ALTER TABLE employees ADD COLUMN phone TEXT',
+    'ALTER TABLE employees ADD COLUMN date_of_hire TEXT',
+    'ALTER TABLE employees ADD COLUMN shift_type TEXT',
+    'ALTER TABLE treasury_sessions ADD COLUMN shift_type TEXT',
     'ALTER TABLE visits ADD COLUMN inventory_deducted INTEGER DEFAULT 0',
     'ALTER TABLE inventory_items ADD COLUMN category TEXT',
     'ALTER TABLE inventory_items ADD COLUMN item_type TEXT DEFAULT "quantity"',
@@ -1241,6 +1255,13 @@ async function runMigrationsMySQL() {
       'ALTER TABLE employees ADD COLUMN pay_cycle VARCHAR(50) DEFAULT \'monthly\'',
       'ALTER TABLE employees ADD COLUMN advance_payment DOUBLE DEFAULT 0',
       'ALTER TABLE employees ADD COLUMN last_paid_date VARCHAR(50) NULL',
+      'ALTER TABLE employees ADD COLUMN age INT NULL',
+      'ALTER TABLE employees ADD COLUMN gender VARCHAR(50) NULL',
+      'ALTER TABLE employees ADD COLUMN address TEXT NULL',
+      'ALTER TABLE employees ADD COLUMN phone VARCHAR(50) NULL',
+      'ALTER TABLE employees ADD COLUMN date_of_hire VARCHAR(50) NULL',
+      'ALTER TABLE employees ADD COLUMN shift_type VARCHAR(50) NULL',
+      'ALTER TABLE treasury_sessions ADD COLUMN shift_type VARCHAR(50) NULL',
       'ALTER TABLE visits ADD COLUMN inventory_deducted INT DEFAULT 0',
       'ALTER TABLE inventory_items ADD COLUMN category VARCHAR(255) NULL',
       'ALTER TABLE inventory_items ADD COLUMN item_type VARCHAR(100) DEFAULT \'quantity\'',
