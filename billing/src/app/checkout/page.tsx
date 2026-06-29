@@ -250,13 +250,14 @@ function CheckoutContent() {
         }
 
         if (plan === 'trial') {
+          const clinicAppUrl = process.env.NEXT_PUBLIC_CLINIC_APP_URL || 'https://clinic.datagris.com';
           setSuccessMessage(t.trialSuccessMsg);
-          setNextUrl('https://clinic.datagris.com');
+          setNextUrl(clinicAppUrl);
           setShowSuccessModal(true);
           
           // Auto redirect after 4 seconds
           setTimeout(() => {
-            window.location.href = 'https://clinic.datagris.com';
+            window.location.href = clinicAppUrl;
           }, 4000);
         } else {
           // Fetch Paymob redirect URL

@@ -26,12 +26,19 @@ export function BillingProvider({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('billing_theme') as Theme;
-    const savedLang = localStorage.getItem('billing_lang') as Lang;
-    const savedCurrency = localStorage.getItem('billing_currency') as Currency;
-    if (savedTheme) setTheme(savedTheme);
-    if (savedLang) setLang(savedLang);
-    if (savedCurrency) setCurrency(savedCurrency);
+    const savedTheme = localStorage.getItem('billing_theme');
+    const savedLang = localStorage.getItem('billing_lang');
+    const savedCurrency = localStorage.getItem('billing_currency');
+    
+    if (savedTheme === 'light' || savedTheme === 'dark') {
+      setTheme(savedTheme);
+    }
+    if (savedLang === 'ar' || savedLang === 'en') {
+      setLang(savedLang);
+    }
+    if (savedCurrency === 'USD' || savedCurrency === 'EGP' || savedCurrency === 'SAR') {
+      setCurrency(savedCurrency);
+    }
 
     // Fetch live global USD exchange rates
     fetch('https://open.er-api.com/v6/latest/USD')
