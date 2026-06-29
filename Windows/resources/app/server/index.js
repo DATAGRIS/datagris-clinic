@@ -3083,6 +3083,21 @@ app.get('/api/reports/dashboard', async (req, res) => {
     d.setDate(d.getDate() - 335); // Total 365 days
     const lastYear = d.toISOString().split('T')[0];
 
+    // Helper to format date whether string or Date object
+    const formatDateField = (fieldVal) => {
+      if (!fieldVal) return '';
+      if (fieldVal instanceof Date) {
+        const year = fieldVal.getFullYear();
+        const month = String(fieldVal.getMonth() + 1).padStart(2, '0');
+        const day = String(fieldVal.getDate()).padStart(2, '0');
+        const hours = String(fieldVal.getHours()).padStart(2, '0');
+        const minutes = String(fieldVal.getMinutes()).padStart(2, '0');
+        const seconds = String(fieldVal.getSeconds()).padStart(2, '0');
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+      }
+      return String(fieldVal);
+    };
+
     // Load useInventory setting
     const useInventoryRow = await db.queryOne("SELECT value FROM settings WHERE key = 'useInventory'");
     const useInventory = useInventoryRow ? useInventoryRow.value === 'true' : false;
@@ -3129,7 +3144,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
       }
 
       if (p.created_at) {
-        const dateStr = p.created_at.substring(0, 10);
+        const dateStr = formatDateField(p.created_at).substring(0, 10);
         if (dateStr === today) {
           dailyExp += amt;
         }
@@ -3221,7 +3236,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
     const allClosedVisits = await db.queryAll("SELECT paid_amount, payment_date, created_at, visit_type FROM visits WHERE status IN ('completed', 'closed')");
     const monthlyGroups = {};
     allClosedVisits.forEach(v => {
-      const dateVal = v.payment_date || (v.created_at ? v.created_at.substring(0, 10) : today);
+      const dateVal = v.payment_date || (v.created_at ? formatDateField(v.created_at).substring(0, 10) : today);
       const month = dateVal.substring(0, 7); // 'YYYY-MM'
       if (!monthlyGroups[month]) {
         monthlyGroups[month] = { month, revenue: 0, count: 0, expenses: 0 };
@@ -3234,7 +3249,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
     const allRefunds = await db.queryAll("SELECT amount, created_at FROM refunds WHERE category='patient'");
     allRefunds.forEach(r => {
       if (!r.created_at) return;
-      const month = r.created_at.substring(0, 7);
+      const month = formatDateField(r.created_at).substring(0, 7);
       if (monthlyGroups[month]) {
         monthlyGroups[month].revenue -= r.amount;
         if (monthlyGroups[month].revenue < 0) monthlyGroups[month].revenue = 0;
@@ -3244,7 +3259,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
     // Also group filtered payment vouchers (expenses) by month
     payments.forEach(p => {
       if (!p.created_at) return;
-      const month = p.created_at.substring(0, 7);
+      const month = formatDateField(p.created_at).substring(0, 7);
       if (!monthlyGroups[month]) {
         monthlyGroups[month] = { month, revenue: 0, count: 0, expenses: 0 };
       }

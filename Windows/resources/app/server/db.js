@@ -257,6 +257,7 @@ function translateSqlToPostgres(sql) {
 
   // Translate created_at LIKE to created_at::text LIKE for Postgres timestamp type compatibility
   translated = translated.replace(/created_at LIKE/g, 'created_at::text LIKE');
+  translated = translated.replace(/DATE\(created_at\)/g, 'created_at::date');
 
   // Replace SQLite/MySQL '?' placeholder with Postgres '$1, $2'
   let index = 1;
