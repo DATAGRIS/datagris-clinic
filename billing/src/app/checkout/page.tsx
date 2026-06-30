@@ -71,6 +71,7 @@ function CheckoutContent() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [mobile, setMobile] = useState('');
+  const [countryCode, setCountryCode] = useState('20');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -179,6 +180,12 @@ function CheckoutContent() {
     setError('');
 
     try {
+      let cleanLocal = mobile.replace(/[^0-9]/g, '');
+      if (cleanLocal.startsWith('0')) {
+        cleanLocal = cleanLocal.slice(1);
+      }
+      const formattedMobile = countryCode + cleanLocal;
+
       if (isExisting) {
         // Upgrade flow for existing clinic
         if (!username) {
@@ -197,7 +204,7 @@ function CheckoutContent() {
             username: username,
             password: password,
             plan: plan,
-            mobile: mobile
+            mobile: formattedMobile
           })
         });
 
@@ -219,7 +226,7 @@ function CheckoutContent() {
             doctorName,
             username,
             password,
-            mobile,
+            mobile: formattedMobile,
             plan
           })
         });
@@ -240,7 +247,7 @@ function CheckoutContent() {
               body: JSON.stringify({
                 clinicId: regData.clinicId,
                 clinicName,
-                mobile,
+                mobile: formattedMobile,
                 username
               })
             });
@@ -406,16 +413,38 @@ function CheckoutContent() {
 
                 <div className="form-group">
                   <label style={{ fontFamily: 'var(--font-ar)' }}>{t.phoneLabel}</label>
-                  <input
-                    type="tel"
-                    className="form-control"
-                    required
-                    placeholder={t.phonePlaceholder}
-                    value={mobile}
-                    onChange={(e) => setMobile(e.target.value)}
-                    disabled={loading}
-                    style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
-                  />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <select
+                      className="form-control"
+                      value={countryCode}
+                      onChange={(e) => setCountryCode(e.target.value)}
+                      disabled={loading}
+                      style={{ width: '120px', flexShrink: 0, height: '46px' }}
+                    >
+                      <option value="20">مصر (+20)</option>
+                      <option value="966">السعودية (+966)</option>
+                      <option value="971">الإمارات (+971)</option>
+                      <option value="965">الكويت (+965)</option>
+                      <option value="974">قطر (+974)</option>
+                      <option value="968">عمان (+968)</option>
+                      <option value="973">البحرين (+973)</option>
+                      <option value="962">الأردن (+962)</option>
+                      <option value="964">العراق (+964)</option>
+                      <option value="967">اليمن (+967)</option>
+                      <option value="249">السودان (+249)</option>
+                      <option value="218">ليبيا (+218)</option>
+                    </select>
+                    <input
+                      type="tel"
+                      className="form-control"
+                      required
+                      placeholder={t.phonePlaceholder}
+                      value={mobile}
+                      onChange={(e) => setMobile(e.target.value)}
+                      disabled={loading}
+                      style={{ direction: 'ltr', textAlign: 'left', height: '46px', flex: 1 }}
+                    />
+                  </div>
                 </div>
               </>
             ) : (
@@ -450,16 +479,38 @@ function CheckoutContent() {
 
                 <div className="form-group">
                   <label style={{ fontFamily: 'var(--font-ar)' }}>{t.phoneLabel}</label>
-                  <input
-                    type="tel"
-                    className="form-control"
-                    required
-                    placeholder={t.phonePlaceholder}
-                    value={mobile}
-                    onChange={(e) => setMobile(e.target.value)}
-                    disabled={loading}
-                    style={{ direction: 'ltr', textAlign: 'left', height: '46px' }}
-                  />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <select
+                      className="form-control"
+                      value={countryCode}
+                      onChange={(e) => setCountryCode(e.target.value)}
+                      disabled={loading}
+                      style={{ width: '120px', flexShrink: 0, height: '46px' }}
+                    >
+                      <option value="20">مصر (+20)</option>
+                      <option value="966">السعودية (+966)</option>
+                      <option value="971">الإمارات (+971)</option>
+                      <option value="965">الكويت (+965)</option>
+                      <option value="974">قطر (+974)</option>
+                      <option value="968">عمان (+968)</option>
+                      <option value="973">البحرين (+973)</option>
+                      <option value="962">الأردن (+962)</option>
+                      <option value="964">العراق (+964)</option>
+                      <option value="967">اليمن (+967)</option>
+                      <option value="249">السودان (+249)</option>
+                      <option value="218">ليبيا (+218)</option>
+                    </select>
+                    <input
+                      type="tel"
+                      className="form-control"
+                      required
+                      placeholder={t.phonePlaceholder}
+                      value={mobile}
+                      onChange={(e) => setMobile(e.target.value)}
+                      disabled={loading}
+                      style={{ direction: 'ltr', textAlign: 'left', height: '46px', flex: 1 }}
+                    />
+                  </div>
                 </div>
 
                 <hr style={{ border: 0, borderTop: '1px solid var(--border-color)', margin: '24px 0' }} />
