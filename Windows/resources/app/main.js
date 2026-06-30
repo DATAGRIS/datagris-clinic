@@ -188,6 +188,7 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
       const tempPath = path.join(app.getPath('temp'), `temp_prescription_${visitId}_${Date.now()}.html`);
       fs.writeFileSync(tempPath, htmlContent, 'utf8');
       await win.loadFile(tempPath);
+      await new Promise(resolve => setTimeout(resolve, 800));
       
       const pdfBuffer = await win.webContents.printToPDF({
         margins: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -218,19 +219,21 @@ ipcMain.handle('print-prescription', async (event, { visitId, htmlContent, pageS
         fs.writeFileSync(tempPath, htmlContent, 'utf8');
         
         win.webContents.once('did-finish-load', () => {
-          win.webContents.print({
-            silent: false,
-            printBackground: true,
-            pageSize: size
-          }, (success, failureReason) => {
-            win.close();
-            try { fs.unlinkSync(tempPath); } catch (e) {}
-            if (success) {
-              resolve({ success: true });
-            } else {
-              resolve({ success: false, error: failureReason || 'Canceled or failed' });
-            }
-          });
+          setTimeout(() => {
+            win.webContents.print({
+              silent: false,
+              printBackground: true,
+              pageSize: size
+            }, (success, failureReason) => {
+              win.close();
+              try { fs.unlinkSync(tempPath); } catch (e) {}
+              if (success) {
+                resolve({ success: true });
+              } else {
+                resolve({ success: false, error: failureReason || 'Canceled or failed' });
+              }
+            });
+          }, 800);
         });
         
         win.loadFile(tempPath).catch(err => {

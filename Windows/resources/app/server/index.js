@@ -98,14 +98,14 @@ wss.on('connection', (ws, req) => {
 
 function broadcast(data, originatingClient = null) {
   // Determine target clinic ID to isolate broadcast
-  // Can be passed explicitly in data, retrieved from active request context, or from the originating client
   const targetClinicId = data.clinicId || db.getRequestClinicId() || (originatingClient ? originatingClient.clinicId : null);
   
+  if (!targetClinicId) return; // Secure isolation: reject if target clinic ID is not specified
+
   const message = JSON.stringify(data);
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
-      // If a target clinic is set, do not send to clients belonging to other clinics
-      if (targetClinicId && client.clinicId && client.clinicId !== targetClinicId) {
+      if (client.clinicId !== targetClinicId) {
         continue;
       }
       client.send(message);
@@ -185,10 +185,11 @@ async function getSystemSettings() {
           settings['subscriptionEndDate'] = new Date(sub.subscription_end_date).toISOString();
         }
         
-        if (sub.whatsapp_api_key_status === 'active') {
+        if (sub.whatsapp_api_key_status === 'active' || sub.whatsapp_api_key_status === 'نشط') {
           const decryptedKey = sub.whatsapp_api_key ? secureCrypto.decrypt(sub.whatsapp_api_key) : 'active';
           settings['whatsappAccessToken'] = decryptedKey;
           settings['whatsappApiKey'] = decryptedKey;
+          settings['whatsappEnabled'] = 'true';
         }
         if (sub.whatsapp_provider) {
           settings['whatsappProvider'] = sub.whatsapp_provider;
@@ -768,63 +769,86 @@ app.post('/api/settings', async (req, res) => {
     const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
     const isMysql = db.getDbType() === 'mysql';
 
-    for (const [key, val] of Object.entries(settings)) {
-      let valueToStore = String(val);
-      if (['whatsappAccessToken', 'whatsappPhoneNumberId', 'whatsappBusinessAccountId'].includes(key)) {
-        valueToStore = secureCrypto.encrypt(valueToStore);
-      }
+    if (isPostgres) {
+      const entries = Object.entries(settings);
+      if (entries.length > 0) {
+        let activeClinicId = db.getRequestClinicId();
+        if (!activeClinicId) {
+          const activeUserId = db.getRequestUserId();
+          if (activeUserId) {
+            const userProfile = await db.queryOne('SELECT clinic_id FROM profiles WHERE id = ?', [activeUserId]);
+            if (userProfile) {
+              activeClinicId = userProfile.clinic_id;
+            }
+          }
+        }
+        if (!activeClinicId) {
+          activeClinicId = process.env.CLINIC_ID || 'CLN-000001';
+        }
 
-      if (isPostgres) {
-        await db.runCommand(
-          'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (clinic_id, key) DO UPDATE SET value = EXCLUDED.value',
-          [key, valueToStore]
-        );
-        if (key === 'clinicLogo') {
+        const valuePlaceholders = entries.map(() => `(?, ?, ?)`).join(', ');
+        const bulkSql = `
+          INSERT INTO settings (clinic_id, key, value) 
+          VALUES ${valuePlaceholders} 
+          ON CONFLICT (clinic_id, key) DO UPDATE SET value = EXCLUDED.value
+        `;
+
+        const bulkParams = [];
+        for (const [key, val] of entries) {
+          let valueToStore = String(val);
+          if (['whatsappAccessToken', 'whatsappPhoneNumberId', 'whatsappBusinessAccountId'].includes(key)) {
+            valueToStore = secureCrypto.encrypt(valueToStore);
+          }
+          bulkParams.push(activeClinicId, key, valueToStore);
+        }
+
+        await db.runCommand(bulkSql, bulkParams);
+
+        if (settings.clinicLogo) {
           try {
-            let activeClinicId = null;
-            const activeUserId = db.getRequestUserId();
-            if (activeUserId) {
-              const userProfile = await db.queryOne('SELECT clinic_id FROM profiles WHERE id = ?', [activeUserId]);
-              if (userProfile) {
-                activeClinicId = userProfile.clinic_id;
-              }
-            }
-            if (!activeClinicId) {
-              activeClinicId = 'CLN-000001';
-            }
             await db.runCommand(
               'INSERT INTO clinic_logos (clinic_id, logo_data) VALUES (?, ?) ON CONFLICT (clinic_id) DO UPDATE SET logo_data = EXCLUDED.logo_data',
-              [activeClinicId, valueToStore]
+              [activeClinicId, String(settings.clinicLogo)]
             );
           } catch (logoErr) {
             console.error('Failed to store in clinic_logos:', logoErr);
           }
         }
-      } else if (isMysql) {
-        await db.runCommand(
-          'INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?',
-          [key, valueToStore, valueToStore]
-        );
-      } else {
-        await db.runCommand(
-          'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-          [key, valueToStore]
-        );
-        if (key === 'clinicLogo') {
-          try {
-            await db.runCommand(
-              'CREATE TABLE IF NOT EXISTS clinic_logos (clinic_id TEXT PRIMARY KEY, logo_data TEXT)'
-            );
-            await db.runCommand(
-              'INSERT OR REPLACE INTO clinic_logos (clinic_id, logo_data) VALUES (?, ?)',
-              ['CLN-000001', valueToStore]
-            );
-          } catch (logoErr) {
-            console.error('Failed to store in SQLite clinic_logos:', logoErr);
+      }
+    } else {
+      for (const [key, val] of Object.entries(settings)) {
+        let valueToStore = String(val);
+        if (['whatsappAccessToken', 'whatsappPhoneNumberId', 'whatsappBusinessAccountId'].includes(key)) {
+          valueToStore = secureCrypto.encrypt(valueToStore);
+        }
+
+        if (isMysql) {
+          await db.runCommand(
+            'INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?',
+            [key, valueToStore, valueToStore]
+          );
+        } else {
+          await db.runCommand(
+            'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+            [key, valueToStore]
+          );
+          if (key === 'clinicLogo') {
+            try {
+              await db.runCommand(
+                'CREATE TABLE IF NOT EXISTS clinic_logos (clinic_id TEXT PRIMARY KEY, logo_data TEXT)'
+              );
+              await db.runCommand(
+                'INSERT OR REPLACE INTO clinic_logos (clinic_id, logo_data) VALUES (?, ?)',
+                ['CLN-000001', valueToStore]
+              );
+            } catch (logoErr) {
+              console.error('Failed to store in SQLite clinic_logos:', logoErr);
+            }
           }
         }
       }
     }
+
     // Log audit
     await db.logAudit(1, 'system', 'UPDATE_SETTINGS', 'Updated clinic settings');
     res.json({ success: true });
@@ -1316,8 +1340,12 @@ app.post('/api/patients', async (req, res) => {
         [name, gender, age, weight, height, temperature, chiefComplaint, JSON.stringify(medicalHistory || {}), wsEnabled, vitalsJson || null, mobileNumberToUse]
       );
     } else {
-      // Generate unique file number PAT-XXXXXX
-      const maxRow = await db.queryOne("SELECT file_number FROM patients WHERE file_number LIKE 'PAT-%' ORDER BY file_number DESC LIMIT 1");
+      // Generate unique file number PAT-XXXXXX per clinic
+      const activeClinicId = db.getRequestClinicId() || 'CLN-000001';
+      const maxRow = await db.queryOne(
+        "SELECT file_number FROM patients WHERE clinic_id = ? AND file_number LIKE 'PAT-%' ORDER BY file_number DESC LIMIT 1",
+        [activeClinicId]
+      );
       let nextIdx = 1;
       if (maxRow && maxRow.file_number) {
         const match = maxRow.file_number.match(/PAT-(\d+)/);
@@ -1345,7 +1373,7 @@ app.post('/api/patients', async (req, res) => {
       if (settings.whatsappEnabled === 'true' && wsEnabled === 1) {
         whatsappService.sendWhatsApp({
           settings,
-          to: mobileNumber,
+          to: mobileNumberToUse,
           messageType: 'welcome',
           variables: {
             PatientName: name,
@@ -1357,7 +1385,7 @@ app.post('/api/patients', async (req, res) => {
         }).catch(err => console.error('Error sending welcome WhatsApp:', err));
       }
     }
-    res.json({ success: true, mobileNumber, fileNumber });
+    res.json({ success: true, mobileNumber: mobileNumberToUse, fileNumber });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3156,7 +3184,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
     const useInventory = useInventoryRow ? useInventoryRow.value === 'true' : false;
 
     // Load and filter payment vouchers (expenses)
-    const rawPayments = await db.queryAll("SELECT amount, description, created_at FROM vouchers WHERE type='payment'");
+    const rawPayments = await db.queryAll("SELECT amount, description, created_at FROM vouchers WHERE type='payment' AND created_at >= ?", [lastYear]);
     
     const isInventoryExpense = (desc) => {
       if (!desc) return false;
@@ -3286,7 +3314,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
     `, [today]);
 
     // 8. DB-agnostic monthly timeline grouping
-    const allClosedVisits = await db.queryAll("SELECT paid_amount, payment_date, created_at, visit_type FROM visits WHERE status IN ('completed', 'closed')");
+    const allClosedVisits = await db.queryAll("SELECT paid_amount, payment_date, created_at, visit_type FROM visits WHERE status IN ('completed', 'closed') AND created_at >= ?", [lastYear]);
     const monthlyGroups = {};
     allClosedVisits.forEach(v => {
       const dateVal = v.payment_date || (v.created_at ? formatDateField(v.created_at).substring(0, 10) : today);
@@ -3299,7 +3327,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
     });
     
     // Also group refunds by month
-    const allRefunds = await db.queryAll("SELECT amount, created_at FROM refunds WHERE category='patient'");
+    const allRefunds = await db.queryAll("SELECT amount, created_at FROM refunds WHERE category='patient' AND created_at >= ?", [lastYear]);
     allRefunds.forEach(r => {
       if (!r.created_at) return;
       const month = formatDateField(r.created_at).substring(0, 7);

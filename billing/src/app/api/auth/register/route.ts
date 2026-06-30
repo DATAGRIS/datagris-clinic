@@ -132,6 +132,13 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      // Update customer_control with WhatsApp number
+      await executeQueryAsAdmin(
+        "UPDATE customer_control SET whatsapp_number = ? WHERE clinic_id = ?",
+        [mobile, clinicId],
+        'run'
+      );
+
       return NextResponse.json({ success: true, isPending: false, clinicId, username });
     } else {
       // 1. Ensure pending_registrations table exists

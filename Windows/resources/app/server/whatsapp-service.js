@@ -563,10 +563,17 @@ class WasenderProvider extends BaseWhatsAppProvider {
 
 // Service Factory
 function getWhatsAppProvider(settings) {
-  const providerType = settings.whatsappProvider || 'meta';
+  let providerType = settings.whatsappProvider || 'meta';
+  
+  // Auto-detect WASender API key (64 hex characters)
+  const token = settings.whatsappAccessToken ? crypto.decrypt(settings.whatsappAccessToken) : '';
+  const cleanToken = token ? token.trim() : '';
+  if (cleanToken && cleanToken.length === 64 && /^[0-9a-fA-F]+$/.test(cleanToken)) {
+    providerType = 'wasender';
+  }
   
   const config = {
-    whatsappProvider: settings.whatsappProvider,
+    whatsappProvider: providerType,
     whatsappAccessToken: settings.whatsappAccessToken,
     whatsappPhoneNumberId: settings.whatsappPhoneNumberId,
     whatsappBusinessAccountId: settings.whatsappBusinessAccountId,

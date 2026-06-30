@@ -177,6 +177,26 @@ async function configurePostgresDefaults(client) {
       // Ignore if table has no serial sequence
     }
   }
+
+  // Create database indexes to speed up operations and reports
+  try {
+    console.log('Creating PostgreSQL indexes for optimization...');
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_visits_clinic_status ON visits(clinic_id, status);
+      CREATE INDEX IF NOT EXISTS idx_visits_clinic_mobile ON visits(clinic_id, patient_mobile);
+      CREATE INDEX IF NOT EXISTS idx_visits_clinic_payment_date ON visits(clinic_id, payment_date);
+      CREATE INDEX IF NOT EXISTS idx_visits_clinic_created_at ON visits(clinic_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_patients_clinic_name ON patients(clinic_id, name);
+      CREATE INDEX IF NOT EXISTS idx_patients_clinic_file ON patients(clinic_id, file_number);
+      CREATE INDEX IF NOT EXISTS idx_vouchers_clinic_type ON vouchers(clinic_id, type);
+      CREATE INDEX IF NOT EXISTS idx_vouchers_clinic_created_at ON vouchers(clinic_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_refunds_clinic_category ON refunds(clinic_id, category);
+      CREATE INDEX IF NOT EXISTS idx_refunds_clinic_created_at ON refunds(clinic_id, created_at);
+    `);
+    console.log('PostgreSQL indexes verified.');
+  } catch (e) {
+    console.warn(`Failed to create Postgres indexes: ${e.message}`);
+  }
 }
 
 // Helper: Parse SQLite date (UTC representation) safely into Local JS Date
@@ -302,12 +322,16 @@ async function queryAll(sql, params = []) {
   } else if (dbType === 'postgres' || dbType === 'postgresql') {
     const client = await pgPool.connect();
     try {
-      await client.query('BEGIN');
       const activeUserId = getRequestUserId() || clinicUserId;
       if (activeUserId) {
-        await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
-        await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
-        await client.query(`SET LOCAL ROLE authenticated`);
+        await client.query(`
+          BEGIN;
+          SELECT set_config('request.jwt.claim.sub', $1, true);
+          SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+          SET LOCAL ROLE authenticated;
+        `, [activeUserId]);
+      } else {
+        await client.query('BEGIN');
       }
       const pgSql = translateSqlToPostgres(sql);
       const result = await client.query(pgSql, cleanParams);
@@ -345,12 +369,16 @@ async function queryOne(sql, params = []) {
   } else if (dbType === 'postgres' || dbType === 'postgresql') {
     const client = await pgPool.connect();
     try {
-      await client.query('BEGIN');
       const activeUserId = getRequestUserId() || clinicUserId;
       if (activeUserId) {
-        await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
-        await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
-        await client.query(`SET LOCAL ROLE authenticated`);
+        await client.query(`
+          BEGIN;
+          SELECT set_config('request.jwt.claim.sub', $1, true);
+          SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+          SET LOCAL ROLE authenticated;
+        `, [activeUserId]);
+      } else {
+        await client.query('BEGIN');
       }
       const pgSql = translateSqlToPostgres(sql);
       const result = await client.query(pgSql, cleanParams);
@@ -393,15 +421,21 @@ async function runCommand(sql, params = []) {
   } else if (dbType === 'postgres' || dbType === 'postgresql') {
     const client = await pgPool.connect();
     try {
-      await client.query('BEGIN');
       const activeUserId = getRequestUserId() || clinicUserId;
-      let activeClinicId = null;
       if (activeUserId) {
-        await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
-        await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
-        await client.query(`SET LOCAL ROLE authenticated`);
-        
-        // Fetch user's clinic_id for RLS insert injection
+        await client.query(`
+          BEGIN;
+          SELECT set_config('request.jwt.claim.sub', $1, true);
+          SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+          SET LOCAL ROLE authenticated;
+        `, [activeUserId]);
+      } else {
+        await client.query('BEGIN');
+      }
+      
+      let activeClinicId = getRequestClinicId();
+      if (!activeClinicId && activeUserId) {
+        // Fetch user's clinic_id for RLS insert injection fallback
         const profileRow = await client.query('SELECT clinic_id FROM profiles WHERE id = $1', [activeUserId]);
         if (profileRow.rows[0]) {
           activeClinicId = profileRow.rows[0].clinic_id;
