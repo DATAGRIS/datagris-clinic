@@ -73,6 +73,8 @@ export default function PricingPage() {
       proF3: 'المستلزمات الطبية، المخازن، الموردين والجرد',
       proF4: 'تفعيل كامل لأوتوميشن الواتساب للروشتات والتنبيهات',
       proF5: 'دعم فني مخصص ومتكامل على مدار الساعة 24/7',
+      proF6: 'تخصيص النظام بالكامل حسب تخصص وهيكل عيادتك',
+      proF7: 'الاتصال التلقائي بالمرضى والشركاء الخارجيين عبر واتساب أوتوماتيكي',
       proBtn: 'اشترك الآن في الاحترافية',
       bestValue: 'الأكثر مبيعاً'
     },
@@ -107,6 +109,8 @@ export default function PricingPage() {
       proF3: 'Stock management, suppliers, and automatic inventory',
       proF4: 'Full WhatsApp API integration for reminders/scripts',
       proF5: 'Priority dedicated technical support 24/7',
+      proF6: 'Fully customize the system to your clinic structure and specialty',
+      proF7: 'Connect with external partners and patients automatically via WhatsApp',
       proBtn: 'Subscribe to Pro',
       bestValue: 'BEST VALUE'
     }
@@ -197,7 +201,26 @@ export default function PricingPage() {
         </div>
 
         {/* Pro Plan */}
-        <div className="pricing-card popular">
+        <div className="pricing-card popular" style={{ position: 'relative' }}>
+          <div className="pricing-badge" style={{
+            position: 'absolute',
+            top: '-12px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'var(--primary)',
+            color: 'white',
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            padding: '4px 16px',
+            borderParagraph: 'none',
+            borderRadius: '12px',
+            letterSpacing: '0.5px',
+            whiteSpace: 'nowrap',
+            fontFamily: 'var(--font-ar)'
+          }}>
+            {t.bestValue}
+          </div>
+
           <div className="pricing-header">
             <h2 style={{ fontFamily: 'var(--font-ar)' }}>{t.proTitle}</h2>
             <div className="price">{proInfo.priceText} <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>{proInfo.periodText}</span></div>
@@ -223,6 +246,14 @@ export default function PricingPage() {
             <li className="pricing-feature">
               <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
               <span style={{ fontFamily: 'var(--font-ar)' }}>{t.proF5}</span>
+            </li>
+            <li className="pricing-feature">
+              <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
+              <span style={{ fontFamily: 'var(--font-ar)', fontWeight: 700, color: 'var(--primary)' }}>{t.proF6}</span>
+            </li>
+            <li className="pricing-feature">
+              <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
+              <span style={{ fontFamily: 'var(--font-ar)', fontWeight: 700, color: 'var(--primary)' }}>{t.proF7}</span>
             </li>
           </ul>
           <Link 

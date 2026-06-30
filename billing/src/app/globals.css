@@ -226,19 +226,7 @@ body {
 }
 
 .pricing-card.popular::before {
-  content: 'BEST VALUE / الأكثر مبيعاً';
-  position: absolute;
-  top: -12px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--primary);
-  color: white;
-  font-size: 0.75rem;
-  font-weight: 700;
-  padding: 4px 16px;
-  border-radius: 12px;
-  letter-spacing: 0.5px;
-  font-family: var(--font-en);
+  content: none;
 }
 
 .pricing-header h2 {

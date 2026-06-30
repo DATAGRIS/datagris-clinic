@@ -125,6 +125,11 @@ function createWindow() {
     }
   });
 
+  // Lock visual zoom factor to prevent trackpad or layout scaling issues
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
+  });
+
   // Remove default menu for clinical app feel
   mainWindow.removeMenu();
 
