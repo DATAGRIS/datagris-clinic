@@ -212,7 +212,7 @@ export default function PricingPage() {
             fontSize: '0.75rem',
             fontWeight: 700,
             padding: '4px 16px',
-            borderParagraph: 'none',
+            border: 'none',
             borderRadius: '12px',
             letterSpacing: '0.5px',
             whiteSpace: 'nowrap',
