@@ -68,11 +68,13 @@ export default function PricingPage() {
 
       proTitle: 'الخطة الاحترافية',
       proDesc: 'الخيار الأقوى والأشمل للعيادات التخصصية والمراكز. تشمل كل شيء حرفياً مع ميزات المخازن، الصيدليات، وأوتوميشن الواتساب.',
-      proF1: 'جميع مميزات الخطة الأساسية',
-      proF2: 'إدارة الإحالات الخارجية والصيدليات والمعامل',
-      proF3: 'المستلزمات الطبية، المخازن، الموردين والجرد',
-      proF4: 'تفعيل كامل لأوتوميشن الواتساب للروشتات والتنبيهات',
-      proF5: 'دعم فني مخصص ومتكامل على مدار الساعة 24/7',
+      proF1: 'إدارة السجلات المرضية وطابور الاستقبال',
+      proF2: 'الروشتة الإلكترونية والمؤشرات الحيوية',
+      proF3: 'إدارة الخزينة وسندات القبض والصرف والتقارير',
+      proF4: 'سجل الصيدليات والإحالات الخارجية (متوفر بالكامل)',
+      proF5: 'المستلزمات الطبية والمخازن (متوفر بالكامل)',
+      proF6: 'أوتوميشن ورسائل الواتساب تلقائياً (متوفر بالكامل)',
+      proF7: 'دعم فني متكامل ومخصص على مدار الساعة 24/7',
       proBtn: 'اشترك الآن في الاحترافية',
       bestValue: 'الأكثر مبيعاً'
     },
@@ -102,11 +104,13 @@ export default function PricingPage() {
 
       proTitle: 'Pro Plan',
       proDesc: 'Our most complete, powerful package for specialized clinics. Everything is included, featuring stock control, pharmacies, and automatic WhatsApp messaging.',
-      proF1: 'All features from Basic Plan',
-      proF2: 'Complete registry for labs, scans, and partners',
-      proF3: 'Stock management, suppliers, and automatic inventory',
-      proF4: 'Full WhatsApp API integration for reminders/scripts',
-      proF5: 'Priority dedicated technical support 24/7',
+      proF1: 'Manage patient files and queue reception',
+      proF2: 'Digital prescriptions and custom vitals',
+      proF3: 'Treasury sessions, cash vouchers & reports',
+      proF4: 'External referral registries (Available)',
+      proF5: 'Stock items & inventory control (Available)',
+      proF6: 'WhatsApp automation & alerts (Available)',
+      proF7: 'Priority dedicated technical support 24/7',
       proBtn: 'Subscribe to Pro',
       bestValue: 'BEST VALUE'
     }
@@ -241,7 +245,15 @@ export default function PricingPage() {
             </li>
             <li className="pricing-feature">
               <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
-              <span style={{ fontFamily: 'var(--font-ar)' }}>{t.proF5}</span>
+              <span style={{ fontFamily: 'var(--font-ar)', fontWeight: 700, color: 'var(--primary)' }}>{t.proF5}</span>
+            </li>
+            <li className="pricing-feature">
+              <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
+              <span style={{ fontFamily: 'var(--font-ar)', fontWeight: 700, color: 'var(--primary)' }}>{t.proF6}</span>
+            </li>
+            <li className="pricing-feature">
+              <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
+              <span style={{ fontFamily: 'var(--font-ar)', fontWeight: 700, color: 'var(--accent-green)' }}>{t.proF7}</span>
             </li>
           </ul>
           <Link 
