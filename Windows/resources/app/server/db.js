@@ -326,10 +326,10 @@ async function queryAll(sql, params = []) {
       if (activeUserId) {
         await client.query(`
           BEGIN;
-          SELECT set_config('request.jwt.claim.sub', $1, true);
           SELECT set_config('request.jwt.claim.role', 'authenticated', true);
           SET LOCAL ROLE authenticated;
-        `, [activeUserId]);
+        `);
+        await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
       } else {
         await client.query('BEGIN');
       }
@@ -373,10 +373,10 @@ async function queryOne(sql, params = []) {
       if (activeUserId) {
         await client.query(`
           BEGIN;
-          SELECT set_config('request.jwt.claim.sub', $1, true);
           SELECT set_config('request.jwt.claim.role', 'authenticated', true);
           SET LOCAL ROLE authenticated;
-        `, [activeUserId]);
+        `);
+        await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
       } else {
         await client.query('BEGIN');
       }
@@ -425,10 +425,10 @@ async function runCommand(sql, params = []) {
       if (activeUserId) {
         await client.query(`
           BEGIN;
-          SELECT set_config('request.jwt.claim.sub', $1, true);
           SELECT set_config('request.jwt.claim.role', 'authenticated', true);
           SET LOCAL ROLE authenticated;
-        `, [activeUserId]);
+        `);
+        await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [activeUserId]);
       } else {
         await client.query('BEGIN');
       }
