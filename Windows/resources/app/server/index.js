@@ -1487,31 +1487,73 @@ app.delete('/api/companions/:id', async (req, res) => {
 app.delete('/api/visits/:id', async (req, res) => {
   try {
     const visitId = req.params.id;
-    const visit = await db.queryOne('SELECT patient_mobile FROM visits WHERE id = ?', [visitId]);
-    if (visit && visit.patient_mobile) {
-      // Find all companion visits that will be deleted
-      const companions = await db.queryAll('SELECT id FROM visits WHERE patient_mobile LIKE ?', [`${visit.patient_mobile}_C_%`]);
-      const companionIds = companions.map(c => c.id);
-      
+    const visit = await db.queryOne('SELECT * FROM visits WHERE id = ?', [visitId]);
+    if (!visit) {
+      return res.json({ success: true });
+    }
+
+    const patient = await db.queryOne('SELECT name FROM patients WHERE mobile_number = ?', [visit.patient_mobile]);
+    const patientName = patient ? patient.name : 'مريض غير معروف';
+
+    // 1. Check if there was any paid amount for this visit
+    if (visit.paid_amount > 0) {
+      // Record a refund for the main visit
+      await db.runCommand(
+        'INSERT INTO refunds (visit_id, category, patient_name, amount, reason, user_responsible) VALUES (?, ?, ?, ?, ?, ?)',
+        [visitId, 'patient', patientName, visit.paid_amount, 'إلغاء حجز مريض', visit.payment_user || 'receptionist']
+      );
+      // Log the refund in treasury transactions
+      await addTreasuryTransaction({
+        type: 'refund',
+        amount: parseFloat(visit.paid_amount),
+        description: `استرجاع إلغاء الحجز - للمريض: ${patientName}`,
+        relatedVisitId: visitId,
+        userResponsible: visit.payment_user || 'receptionist'
+      });
+      // Deduct from patient total_paid
+      await db.runCommand(
+        'UPDATE patients SET total_paid = CASE WHEN total_paid - ? < 0 THEN 0 ELSE total_paid - ? END WHERE mobile_number = ?',
+        [visit.paid_amount, visit.paid_amount, visit.patient_mobile]
+      );
+    }
+
+    // 2. Handle companion visits
+    if (visit.patient_mobile) {
+      const companions = await db.queryAll('SELECT * FROM visits WHERE patient_mobile LIKE ?', [`${visit.patient_mobile}_C_%`]);
+      for (const c of companions) {
+        if (c.paid_amount > 0) {
+          const compPatient = await db.queryOne('SELECT name FROM patients WHERE mobile_number = ?', [c.patient_mobile]);
+          const compName = compPatient ? compPatient.name : 'مرافق';
+          // Record companion refund
+          await db.runCommand(
+            'INSERT INTO refunds (visit_id, category, patient_name, amount, reason, user_responsible) VALUES (?, ?, ?, ?, ?, ?)',
+            [c.id, 'patient', compName, c.paid_amount, 'إلغاء حجز مرافق مريض', c.payment_user || 'receptionist']
+          );
+          await addTreasuryTransaction({
+            type: 'refund',
+            amount: parseFloat(c.paid_amount),
+            description: `استرجاع إلغاء حجز (مرافق) - للمريض: ${compName}`,
+            relatedVisitId: c.id,
+            userResponsible: c.payment_user || 'receptionist'
+          });
+          // Deduct from companion patient total_paid
+          await db.runCommand(
+            'UPDATE patients SET total_paid = CASE WHEN total_paid - ? < 0 THEN 0 ELSE total_paid - ? END WHERE mobile_number = ?',
+            [c.paid_amount, c.paid_amount, c.patient_mobile]
+          );
+        }
+      }
       // Delete companion visits
       await db.runCommand('DELETE FROM visits WHERE patient_mobile LIKE ?', [`${visit.patient_mobile}_C_%`]);
-      
-      // Delete companion treasury transactions
-      if (companionIds.length > 0) {
-        const placeHolders = companionIds.map(() => '?').join(',');
-        await db.runCommand(`DELETE FROM treasury_transactions WHERE related_visit_id IN (${placeHolders})`, companionIds);
-      }
     }
-    
-    // Delete the main visit's treasury transactions
-    await db.runCommand('DELETE FROM treasury_transactions WHERE related_visit_id = ?', [visitId]);
-    
-    // Delete the main visit
+
+    // 3. Delete the main visit
     await db.runCommand('DELETE FROM visits WHERE id = ?', [visitId]);
     
     broadcast({ event: 'QUEUE_UPDATE' });
     res.json({ success: true });
   } catch (err) {
+    console.error('Delete visit error:', err);
     res.status(500).json({ error: err.message });
   }
 });

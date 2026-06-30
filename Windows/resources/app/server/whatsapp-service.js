@@ -603,6 +603,24 @@ function getWhatsAppProvider(settings) {
 }
 
 
+function formatEgyptianPhoneNumber(phone) {
+  if (!phone) return '';
+  let cleaned = phone.replace(/[^0-9]/g, '');
+  // Egyptian local mobile numbers (11 digits starting with 01) -> prepend '20' and drop leading '0'
+  if (cleaned.startsWith('01') && cleaned.length === 11) {
+    return '20' + cleaned.slice(1);
+  }
+  // Local mobile without leading '0' (10 digits starting with 1) -> prepend '20'
+  if (cleaned.startsWith('1') && cleaned.length === 10) {
+    return '20' + cleaned;
+  }
+  // Already formatted international Egyptian number (12 digits starting with 201)
+  if (cleaned.startsWith('201') && cleaned.length === 12) {
+    return cleaned;
+  }
+  return cleaned;
+}
+
 // Main Send WhatsApp Message Helper
 async function sendWhatsApp({ settings, to, messageType, variables = {}, pdfBuffer = null, filename = '', userResponsible = 'system', customText = null }) {
   const isEnabled = settings.whatsappEnabled === 'true';
@@ -621,34 +639,35 @@ async function sendWhatsApp({ settings, to, messageType, variables = {}, pdfBuff
   const logDate = new Date().toISOString().split('T')[0];
   const logTime = new Date().toTimeString().split(' ')[0];
   const patientName = variables.PatientName || 'Guest';
+  const formattedTo = formatEgyptianPhoneNumber(to);
 
   try {
     const provider = getWhatsAppProvider(settings);
     
     let result = null;
     if (pdfBuffer) {
-      result = await provider.sendDocument(to, pdfBuffer, filename || 'prescription.pdf', messageText);
+      result = await provider.sendDocument(formattedTo, pdfBuffer, filename || 'prescription.pdf', messageText);
     } else {
-      result = await provider.sendMessage(to, messageText);
+      result = await provider.sendMessage(formattedTo, messageText);
     }
 
     // Log success
     await db.runCommand(
       `INSERT INTO whatsapp_logs (log_date, log_time, patient_name, phone_number, message_type, message_text, delivery_status, user_responsible)
        VALUES (?, ?, ?, ?, ?, ?, 'sent', ?)`,
-      [logDate, logTime, patientName, to, messageType, messageText, userResponsible]
+      [logDate, logTime, patientName, formattedTo, messageType, messageText, userResponsible]
     );
 
     return { success: true, status: 'sent', result };
   } catch (err) {
-    console.error(`[WHATSAPP ERROR] Failed to send ${messageType} to ${to}:`, err.message);
+    console.error(`[WHATSAPP ERROR] Failed to send ${messageType} to ${formattedTo}:`, err.message);
 
     // Log failure in DB (Ensures normal operations continue)
     try {
       await db.runCommand(
         `INSERT INTO whatsapp_logs (log_date, log_time, patient_name, phone_number, message_type, message_text, delivery_status, error_details, user_responsible)
          VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, ?)`,
-        [logDate, logTime, patientName, to, messageType, messageText, err.message, userResponsible]
+        [logDate, logTime, patientName, formattedTo, messageType, messageText, err.message, userResponsible]
       );
     } catch (e) {
       console.error('Failed to log WhatsApp failure in DB:', e);
