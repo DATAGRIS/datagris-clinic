@@ -73,8 +73,6 @@ export default function PricingPage() {
       proF3: 'المستلزمات الطبية، المخازن، الموردين والجرد',
       proF4: 'تفعيل كامل لأوتوميشن الواتساب للروشتات والتنبيهات',
       proF5: 'دعم فني مخصص ومتكامل على مدار الساعة 24/7',
-      proF6: 'تخصيص النظام بالكامل حسب تخصص وهيكل عيادتك',
-      proF7: 'الاتصال التلقائي بالمرضى والشركاء الخارجيين عبر واتساب أوتوماتيكي',
       proBtn: 'اشترك الآن في الاحترافية',
       bestValue: 'الأكثر مبيعاً'
     },
@@ -84,7 +82,7 @@ export default function PricingPage() {
       heroDesc: 'Choose the perfect plan and empower your clinic workflow with integrated EMR charts, prescriptions, expense tracking, and inventory control.',
       
       trialTitle: 'Free Trial',
-      trialDesc: 'Experience the complete clinic OS free for 7 days with no billing details required to discover how our smart workflow saves you time.',
+      trialDesc: 'Experience the complete EMR free for 7 days with no billing details required to discover how our smart workflow saves you time.',
       trialF1: '7-Day complete feature trial',
       trialF2: 'Digital EMR and patient queue system',
       trialF3: 'Custom vitals signs templates',
@@ -109,8 +107,6 @@ export default function PricingPage() {
       proF3: 'Stock management, suppliers, and automatic inventory',
       proF4: 'Full WhatsApp API integration for reminders/scripts',
       proF5: 'Priority dedicated technical support 24/7',
-      proF6: 'Fully customize the system to your clinic structure and specialty',
-      proF7: 'Connect with external partners and patients automatically via WhatsApp',
       proBtn: 'Subscribe to Pro',
       bestValue: 'BEST VALUE'
     }
@@ -246,14 +242,6 @@ export default function PricingPage() {
             <li className="pricing-feature">
               <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
               <span style={{ fontFamily: 'var(--font-ar)' }}>{t.proF5}</span>
-            </li>
-            <li className="pricing-feature">
-              <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
-              <span style={{ fontFamily: 'var(--font-ar)', fontWeight: 700, color: 'var(--primary)' }}>{t.proF6}</span>
-            </li>
-            <li className="pricing-feature">
-              <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
-              <span style={{ fontFamily: 'var(--font-ar)', fontWeight: 700, color: 'var(--primary)' }}>{t.proF7}</span>
             </li>
           </ul>
           <Link 

@@ -25,6 +25,14 @@ export default function FeaturesPage() {
         {
           title: 'صلاحيات الموظفين وإدارتهم',
           desc: 'توزيع العمل بين الطبيب وموظف الاستقبال والمحاسب والمدير وصاحب العيادة مع إخفاء الأقسام غير المصرح بدخولها لزيادة السرية.'
+        },
+        {
+          title: 'تخصيص النظام بالكامل حسب عيادتك',
+          desc: 'قادر على تخصيص النظام بالكامل ليتناسب بدقة مع تخصص عيادتك الطبي وهيكل العمل الخاص بك.'
+        },
+        {
+          title: 'الاتصال التلقائي عبر واتساب',
+          desc: 'قادر على الاتصال التلقائي بالمرضى والشركاء الخارجيين لإرسال الروشتات والتنبيهات بشكل أوتوماتيكي بالكامل.'
         }
       ]
     },
@@ -47,6 +55,14 @@ export default function FeaturesPage() {
         {
           title: 'Staff Roles & Access Security',
           desc: 'Separate duties between Doctor, Receptionist, Accountant, Manager, and Owner, filtering visible UI layouts and queries.'
+        },
+        {
+          title: 'Full Clinic Customization',
+          desc: 'Fully customize the clinic OS layout, fields, templates, and specialty options to map your custom clinic workflows.'
+        },
+        {
+          title: 'Automated WhatsApp Messaging',
+          desc: 'Connect automatically with external partners and patients via WhatsApp to send digital prescriptions, reminders, and alerts.'
         }
       ]
     }
