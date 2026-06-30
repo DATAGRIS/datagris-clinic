@@ -96,49 +96,6 @@ export default function ContactPage() {
       </div>
 
       <div className="form-card" style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }}>
-        {success && (
-          <div className="custom-modal-overlay" style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100vw',
-            height: '100vh',
-            backgroundColor: 'rgba(0, 0, 0, 0.4)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 99999
-          }}>
-            <div className="glass-card animate-fadeIn" style={{
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '12px',
-              padding: '24px',
-              maxWidth: '420px',
-              width: '90%',
-              textAlign: 'center',
-              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.15)'
-            }}>
-              <div style={{ fontSize: '2.5rem', marginBottom: '16px' }}>🎉</div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '12px', color: 'var(--text-main)', fontFamily: 'var(--font-ar)' }}>
-                {lang === 'ar' ? 'تم الإرسال بنجاح' : 'Sent Successfully'}
-              </h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: '1.6', marginBottom: '24px', fontFamily: 'var(--font-ar)' }}>
-                {t.successMsg}
-              </p>
-              <button 
-                type="button"
-                className="btn btn-primary" 
-                onClick={() => setSuccess(false)}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', fontFamily: 'var(--font-ar)' }}
-              >
-                {lang === 'ar' ? 'حسناً' : 'OK'}
-              </button>
-            </div>
-          </div>
-        )}
 
         {error && (
           <div className="checkout-error-banner" style={{ textAlign: 'start', margin: '0 0 20px 0' }}>
@@ -228,6 +185,50 @@ export default function ContactPage() {
       <div style={{ marginTop: '40px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-ar)' }}>
         <p>{t.supportEmail}</p>
       </div>
+
+      {success && (
+        <div className="custom-modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0, 0, 0, 0.4)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999
+        }}>
+          <div className="glass-card animate-fadeIn" style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '12px',
+            padding: '24px',
+            maxWidth: '420px',
+            width: '90%',
+            textAlign: 'center',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.15)'
+          }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: '16px' }}>🎉</div>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '12px', color: 'var(--text-main)', fontFamily: 'var(--font-ar)' }}>
+              {lang === 'ar' ? 'تم الإرسال بنجاح' : 'Sent Successfully'}
+            </h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: '1.6', marginBottom: '24px', fontFamily: 'var(--font-ar)' }}>
+              {t.successMsg}
+            </p>
+            <button 
+              type="button"
+              className="btn btn-primary" 
+              onClick={() => setSuccess(false)}
+              style={{ width: '100%', padding: '12px', borderRadius: '8px', fontSize: '0.95rem', fontWeight: 'bold', fontFamily: 'var(--font-ar)' }}
+            >
+              {lang === 'ar' ? 'حسناً' : 'OK'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

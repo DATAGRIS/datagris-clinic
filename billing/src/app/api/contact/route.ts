@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
 
     const mailOptions = {
       from: emailUser,
-      to: 'datagric.clinic@gmail.com',
+      to: 'support@datagris.com, datagric.clinic@gmail.com',
       subject: `✉️ رسالة جديدة من صفحة اتصل بنا - ${name}`,
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eaeaea; border-radius: 5px; direction: rtl; text-align: right;">
