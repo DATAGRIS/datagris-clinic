@@ -21,8 +21,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// Cache user-to-clinic mappings in memory to avoid repeated DB queries
+const userClinicCache = new Map();
+
 // Parse request userId from headers or cookies and propagate context for PostgreSQL row-level security (RLS)
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   let userId = req.headers['x-user-id'] || null;
   if (!userId && req.headers.cookie) {
     const match = req.headers.cookie.match(/userId=([^;]+)/);
@@ -30,7 +33,27 @@ app.use((req, res, next) => {
       userId = match[1];
     }
   }
-  db.runWithUser(userId, next);
+
+  let clinicId = null;
+  if (userId) {
+    clinicId = userClinicCache.get(userId);
+    if (!clinicId) {
+      try {
+        const isPostgres = db.getDbType() === 'postgres' || db.getDbType() === 'postgresql';
+        if (isPostgres) {
+          const profile = await db.queryOne('SELECT clinic_id FROM profiles WHERE id = ?', [userId]);
+          if (profile) {
+            clinicId = profile.clinic_id;
+            userClinicCache.set(userId, clinicId);
+          }
+        }
+      } catch (err) {
+        console.error('Error resolving clinicId for request context:', err);
+      }
+    }
+  }
+
+  db.runWithUserAndClinic(userId, clinicId, next);
 });
 
 // Serve static files from React dist directory
@@ -46,13 +69,23 @@ const wss = new WebSocketServer({ server });
 // WebSocket clients
 const clients = new Set();
 
-wss.on('connection', (ws) => {
+const url = require('url');
+
+wss.on('connection', (ws, req) => {
+  try {
+    const parameters = url.parse(req.url, true).query;
+    ws.clinicId = parameters.clinicId || null;
+  } catch (e) {
+    console.error('Failed to parse WebSocket connection URL parameters:', e);
+    ws.clinicId = null;
+  }
+
   clients.add(ws);
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message.toString());
       if (data.event === 'SUMMON_RECEPTIONIST') {
-        broadcast(data);
+        broadcast(data, ws);
       }
     } catch (e) {
       console.error('WebSocket received message parse error:', e);
@@ -63,10 +96,18 @@ wss.on('connection', (ws) => {
   });
 });
 
-function broadcast(data) {
+function broadcast(data, originatingClient = null) {
+  // Determine target clinic ID to isolate broadcast
+  // Can be passed explicitly in data, retrieved from active request context, or from the originating client
+  const targetClinicId = data.clinicId || db.getRequestClinicId() || (originatingClient ? originatingClient.clinicId : null);
+  
   const message = JSON.stringify(data);
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
+      // If a target clinic is set, do not send to clients belonging to other clinics
+      if (targetClinicId && client.clinicId && client.clinicId !== targetClinicId) {
+        continue;
+      }
       client.send(message);
     }
   }
@@ -935,6 +976,8 @@ app.post('/api/auth/login', async (req, res) => {
       if (!profile) {
         return res.status(404).json({ error: 'لم يتم العثور على ملف تعريف المستخدم الخاص بك' });
       }
+
+      userClinicCache.set(profile.id, profile.clinic_id);
 
       await db.runWithUser(profile.id, () =>
         db.logAudit(profile.id, profile.username, 'USER_LOGIN', `User logged in as ${profile.role}`)

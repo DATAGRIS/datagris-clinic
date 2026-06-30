@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     if (plan === 'trial') {
       // 1. Generate unique clinic ID
       const lastClinic = await executeQueryAsAdmin(
-        "SELECT id FROM clinics WHERE id LIKE 'CLN-%' ORDER BY id DESC LIMIT 1",
+        "SELECT id FROM clinics WHERE id ~ '^CLN-[0-9]+$' ORDER BY id DESC LIMIT 1",
         [],
         'one'
       );

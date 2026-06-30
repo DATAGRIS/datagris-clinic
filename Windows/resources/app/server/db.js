@@ -13,12 +13,21 @@ let dbPath = '';
 let clinicUserId = null;
 
 function runWithUser(userId, callback) {
-  asyncLocalStorage.run({ userId }, callback);
+  asyncLocalStorage.run({ userId, clinicId: null }, callback);
+}
+
+function runWithUserAndClinic(userId, clinicId, callback) {
+  asyncLocalStorage.run({ userId, clinicId }, callback);
 }
 
 function getRequestUserId() {
   const store = asyncLocalStorage.getStore();
   return store ? store.userId : null;
+}
+
+function getRequestClinicId() {
+  const store = asyncLocalStorage.getStore();
+  return store ? store.clinicId : null;
 }
 
 async function initDatabase() {
@@ -1333,6 +1342,8 @@ module.exports = {
   getDbType: () => dbType,
   getDbPath: () => dbPath,
   runWithUser,
+  runWithUserAndClinic,
   getRequestUserId,
+  getRequestClinicId,
   getClinicUserId: () => clinicUserId
 };
