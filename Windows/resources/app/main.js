@@ -44,8 +44,9 @@ const defaultConfig = {
   mode: 'standalone', // 'standalone' (host) or 'client'
   serverIp: 'localhost',
   serverPort: 5000,
-  dbType: 'sqlite', // 'sqlite' or 'mysql'
+  dbType: 'sqlite', // 'sqlite' or 'mysql' or 'postgres'
   theme: 'dark',
+  postgresUrl: '',
   mysqlConfig: {
     host: 'localhost',
     port: 3306,
@@ -94,6 +95,8 @@ async function startBackendServer(config) {
         process.env.MYSQL_USER = config.mysqlConfig.user;
         process.env.MYSQL_PASSWORD = config.mysqlConfig.password;
         process.env.MYSQL_DATABASE = config.mysqlConfig.database;
+      } else if (config.dbType === 'postgres' || config.dbType === 'postgresql') {
+        process.env.DATABASE_URL = config.postgresUrl || '';
       }
 
       // Load server
