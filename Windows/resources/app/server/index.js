@@ -3395,7 +3395,6 @@ app.get('/api/reports/dashboard', async (req, res) => {
     });
     
     // Also group refunds by month
-    const allRefunds = await db.queryAll("SELECT amount, created_at FROM refunds WHERE category='patient' AND created_at >= ?", [lastYear]);
     allRefunds.forEach(r => {
       if (!r.created_at) return;
       const month = formatDateField(r.created_at).substring(0, 7);

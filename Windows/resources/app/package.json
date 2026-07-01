@@ -28,6 +28,7 @@
     "electron": "^31.3.1",
     "electron-builder": "^24.13.3",
     "electron-packager": "^17.1.2",
+    "javascript-obfuscator": "^5.4.3",
     "vite": "^5.4.2"
   },
   "build": {
