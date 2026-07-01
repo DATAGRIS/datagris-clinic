@@ -657,12 +657,30 @@ app.get('/api/treasury/stats', async (req, res) => {
   try {
     const active = await getActiveTreasurySession();
     
+    const sessionId = active ? active.id : null;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const currentYearMonth = new Date().toISOString().substring(0, 7);
+
+    const [transactions, todayTx, monthTx, dailyTimeline] = await Promise.all([
+      sessionId ? db.queryAll("SELECT type, amount, description FROM treasury_transactions WHERE treasury_session_id = $1", [sessionId]) : Promise.resolve([]),
+      db.queryAll("SELECT type, amount, description FROM treasury_transactions WHERE date = $1", [todayStr]),
+      db.queryAll("SELECT type, amount, description FROM treasury_transactions WHERE date LIKE $1", [`${currentYearMonth}%`]),
+      db.queryAll(`
+        SELECT date, 
+          SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as income,
+          SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as expense,
+          SUM(CASE WHEN type = 'refund' THEN amount ELSE 0 END) as refund,
+          SUM(CASE WHEN type = 'adjustment' AND description NOT LIKE '%TREASURY_OPENING_BALANCE%' THEN amount ELSE 0 END) as adjustment
+        FROM treasury_transactions 
+        GROUP BY date 
+        ORDER BY date DESC 
+        LIMIT 30
+      `)
+    ]);
+
     let liveBalance = 0;
     if (active) {
-      const sessionId = active.id;
       const opening = active.opening_balance || 0;
-      
-      const transactions = await db.queryAll("SELECT type, amount, description FROM treasury_transactions WHERE treasury_session_id = ?", [sessionId]);
       let income = 0;
       let expense = 0;
       let refund = 0;
@@ -682,9 +700,6 @@ app.get('/api/treasury/stats', async (req, res) => {
       liveBalance = opening + income - expense - refund + adjustment;
     }
     
-    const todayStr = new Date().toISOString().split('T')[0];
-    const todayTx = await db.queryAll("SELECT type, amount, description FROM treasury_transactions WHERE date = ?", [todayStr]);
-    
     let todayIncome = 0;
     let todayExpense = 0;
     let todayRefund = 0;
@@ -702,9 +717,6 @@ app.get('/api/treasury/stats', async (req, res) => {
     });
     
     const todayNet = todayIncome - todayExpense - todayRefund + todayAdjustment;
-    
-    const currentYearMonth = new Date().toISOString().substring(0, 7);
-    const monthTx = await db.queryAll("SELECT type, amount, description FROM treasury_transactions WHERE date LIKE ?", [`${currentYearMonth}%`]);
     
     let monthIncome = 0;
     let monthExpense = 0;
@@ -726,18 +738,6 @@ app.get('/api/treasury/stats', async (req, res) => {
     const totalRevenueSum = monthIncome || 1;
     const profitPercentage = Math.max(0, (monthNetProfit / totalRevenueSum) * 100);
     const lossPercentage = Math.max(0, ((monthExpense + monthRefund) / totalRevenueSum) * 100);
-    
-    const dailyTimeline = await db.queryAll(`
-      SELECT date, 
-        SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as income,
-        SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as expense,
-        SUM(CASE WHEN type = 'refund' THEN amount ELSE 0 END) as refund,
-        SUM(CASE WHEN type = 'adjustment' AND description NOT LIKE '%TREASURY_OPENING_BALANCE%' THEN amount ELSE 0 END) as adjustment
-      FROM treasury_transactions 
-      GROUP BY date 
-      ORDER BY date DESC 
-      LIMIT 30
-    `);
     
     res.json({
       isOpen: !!active,
@@ -3236,13 +3236,91 @@ app.get('/api/reports/dashboard', async (req, res) => {
       return String(fieldVal);
     };
 
-    // Load useInventory setting
-    const useInventoryRow = await db.queryOne("SELECT value FROM settings WHERE key = 'useInventory'");
+    // 1. Fetch metadata and settings in parallel
+    const [
+      useInventoryRow,
+      rawPayments,
+      dailyRev,
+      weeklyRev,
+      monthlyRev,
+      yearlyRev,
+      dailyRef,
+      weeklyRef,
+      monthlyRef,
+      yearlyRef,
+      refundTotal,
+      patientStats,
+      serviceStats,
+      visitStats,
+      consultStats,
+      followupStats,
+      waitStats,
+      durationStats,
+      satisfactionStats,
+      topPatients,
+      topServices,
+      upcomingFollowups,
+      allClosedVisits,
+      allRefunds
+    ] = await Promise.all([
+      db.queryOne("SELECT value FROM settings WHERE key = 'useInventory'"),
+      db.queryAll("SELECT amount, description, created_at FROM vouchers WHERE type='payment' AND created_at >= $1", [lastYear]),
+      db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date = $1 OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at LIKE $2)", [today, `${today}%`]),
+      db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date >= $1 OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at >= $2)", [lastWeek, lastWeek]),
+      db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date >= $1 OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at >= $2)", [lastMonth, lastMonth]),
+      db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date >= $1 OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at >= $2)", [lastYear, lastYear]),
+      db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND created_at LIKE $1", [`${today}%`]),
+      db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND DATE(created_at) >= $1", [lastWeek]),
+      db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND DATE(created_at) >= $1", [lastMonth]),
+      db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND DATE(created_at) >= $1", [lastYear]),
+      db.queryOne("SELECT SUM(amount) as total FROM refunds"),
+      db.queryOne("SELECT COUNT(*) as total_patients FROM patients"),
+      db.queryOne("SELECT COUNT(*) as total_services FROM medical_services WHERE is_disabled = 0"),
+      db.queryOne("SELECT COUNT(*) as total_visits FROM visits WHERE status IN ('completed', 'closed')"),
+      db.queryOne("SELECT COUNT(*) as total FROM visits WHERE status IN ('completed', 'closed') AND visit_type='consultation'"),
+      db.queryOne("SELECT COUNT(*) as total FROM visits WHERE status IN ('completed', 'closed') AND visit_type='followup'"),
+      db.queryOne(`
+        SELECT AVG(waiting_time_seconds) as avg_wait,
+               MIN(waiting_time_seconds) as min_wait,
+               MAX(waiting_time_seconds) as max_wait
+        FROM visits
+        WHERE status IN ('completed', 'closed') AND waiting_time_seconds IS NOT NULL AND waiting_time_seconds > 0
+      `),
+      db.queryOne(`
+        SELECT AVG(consultation_duration_seconds) as avg_duration
+        FROM visits
+        WHERE status IN ('completed', 'closed') AND consultation_duration_seconds IS NOT NULL AND consultation_duration_seconds > 0
+      `),
+      db.queryAll(`
+        SELECT satisfaction_status, COUNT(*) as count
+        FROM visits
+        WHERE status IN ('completed', 'closed') AND satisfaction_status IS NOT NULL
+        GROUP BY satisfaction_status
+      `),
+      db.queryAll(`
+        SELECT name, mobile_number, visit_count, total_paid 
+        FROM patients 
+        ORDER BY visit_count DESC LIMIT 5
+      `),
+      db.queryAll(`
+        SELECT service_name, COUNT(*) as count, SUM(price) as revenue
+        FROM visit_services
+        GROUP BY service_name
+        ORDER BY count DESC LIMIT 5
+      `),
+      db.queryAll(`
+        SELECT v.follow_up_date, p.name as patient_name, p.mobile_number 
+        FROM visits v 
+        JOIN patients p ON v.patient_mobile = p.mobile_number 
+        WHERE v.status IN ('completed', 'closed') AND v.follow_up_date >= $1 
+        ORDER BY v.follow_up_date ASC LIMIT 5
+      `, [today]),
+      db.queryAll("SELECT paid_amount, payment_date, created_at, visit_type FROM visits WHERE status IN ('completed', 'closed') AND created_at >= $1", [lastYear]),
+      db.queryAll("SELECT amount, created_at FROM refunds WHERE category='patient' AND created_at >= $1", [lastYear])
+    ]);
+
     const useInventory = useInventoryRow ? useInventoryRow.value === 'true' : false;
 
-    // Load and filter payment vouchers (expenses)
-    const rawPayments = await db.queryAll("SELECT amount, description, created_at FROM vouchers WHERE type='payment' AND created_at >= ?", [lastYear]);
-    
     const isInventoryExpense = (desc) => {
       if (!desc) return false;
       return desc.includes('شراء مخزون') || desc.includes('فاتورة شراء مخزون') || desc.includes('مخزن') || desc.includes('مخزون');
@@ -3298,80 +3376,13 @@ app.get('/api/reports/dashboard', async (req, res) => {
       }
     });
 
-    // 1. Gross Revenues
-    const dailyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date = ? OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at LIKE ?)", [today, `${today}%`]);
-    const weeklyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date >= ? OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at >= ?)", [lastWeek, lastWeek]);
-    const monthlyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date >= ? OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at >= ?)", [lastMonth, lastMonth]);
-    const yearlyRev = await db.queryOne("SELECT SUM(paid_amount) as total FROM visits WHERE payment_date >= ? OR (payment_date IS NULL AND status IN ('completed', 'closed') AND created_at >= ?)", [lastYear, lastYear]);
-
-    // 2. Refunds (Patient)
-    const dailyRef = await db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND created_at LIKE ?", [`${today}%`]);
-    const weeklyRef = await db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND DATE(created_at) >= ?", [lastWeek]);
-    const monthlyRef = await db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND DATE(created_at) >= ?", [lastMonth]);
-    const yearlyRef = await db.queryOne("SELECT SUM(amount) as total FROM refunds WHERE category='patient' AND DATE(created_at) >= ?", [lastYear]);
-
     // Net Calculations
     const dailyNet = Math.max(0, (dailyRev?.total || 0) - (dailyRef?.total || 0));
     const weeklyNet = Math.max(0, (weeklyRev?.total || 0) - (weeklyRef?.total || 0));
     const monthlyNet = Math.max(0, (monthlyRev?.total || 0) - (monthlyRef?.total || 0));
     const yearlyNet = Math.max(0, (yearlyRev?.total || 0) - (yearlyRef?.total || 0));
-    const refundTotal = await db.queryOne("SELECT SUM(amount) as total FROM refunds");
-
-    // 3. Counts
-    const patientStats = await db.queryOne("SELECT COUNT(*) as total_patients FROM patients");
-    const serviceStats = await db.queryOne("SELECT COUNT(*) as total_services FROM medical_services WHERE is_disabled = 0");
-    const visitStats = await db.queryOne("SELECT COUNT(*) as total_visits FROM visits WHERE status IN ('completed', 'closed')");
-    const consultStats = await db.queryOne("SELECT COUNT(*) as total FROM visits WHERE status IN ('completed', 'closed') AND visit_type='consultation'");
-    const followupStats = await db.queryOne("SELECT COUNT(*) as total FROM visits WHERE status IN ('completed', 'closed') AND visit_type='followup'");
-
-    // 4. Waiting & Consultation Time Analytics
-    const waitStats = await db.queryOne(`
-      SELECT AVG(waiting_time_seconds) as avg_wait,
-             MIN(waiting_time_seconds) as min_wait,
-             MAX(waiting_time_seconds) as max_wait
-      FROM visits
-      WHERE status IN ('completed', 'closed') AND waiting_time_seconds IS NOT NULL AND waiting_time_seconds > 0
-    `);
-    
-    const durationStats = await db.queryOne(`
-      SELECT AVG(consultation_duration_seconds) as avg_duration
-      FROM visits
-      WHERE status IN ('completed', 'closed') AND consultation_duration_seconds IS NOT NULL AND consultation_duration_seconds > 0
-    `);
-
-    // 5. Patient Satisfaction Counts
-    const satisfactionStats = await db.queryAll(`
-      SELECT satisfaction_status, COUNT(*) as count
-      FROM visits
-      WHERE status IN ('completed', 'closed') AND satisfaction_status IS NOT NULL
-      GROUP BY satisfaction_status
-    `);
-
-    // 6. Top Rankings
-    const topPatients = await db.queryAll(`
-      SELECT name, mobile_number, visit_count, total_paid 
-      FROM patients 
-      ORDER BY visit_count DESC LIMIT 5
-    `);
-
-    const topServices = await db.queryAll(`
-      SELECT service_name, COUNT(*) as count, SUM(price) as revenue
-      FROM visit_services
-      GROUP BY service_name
-      ORDER BY count DESC LIMIT 5
-    `);
-
-    // 7. Upcoming Followups
-    const upcomingFollowups = await db.queryAll(`
-      SELECT v.follow_up_date, p.name as patient_name, p.mobile_number 
-      FROM visits v 
-      JOIN patients p ON v.patient_mobile = p.mobile_number 
-      WHERE v.status IN ('completed', 'closed') AND v.follow_up_date >= ? 
-      ORDER BY v.follow_up_date ASC LIMIT 5
-    `, [today]);
 
     // 8. DB-agnostic monthly timeline grouping
-    const allClosedVisits = await db.queryAll("SELECT paid_amount, payment_date, created_at, visit_type FROM visits WHERE status IN ('completed', 'closed') AND created_at >= ?", [lastYear]);
     const monthlyGroups = {};
     allClosedVisits.forEach(v => {
       const dateVal = v.payment_date || (v.created_at ? formatDateField(v.created_at).substring(0, 10) : today);
