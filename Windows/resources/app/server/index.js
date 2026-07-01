@@ -195,6 +195,21 @@ async function getSystemSettings() {
           settings['whatsappProvider'] = sub.whatsapp_provider;
         }
       }
+
+      // Also override WhatsApp number from customer_control table if postgres
+      if (isPostgres) {
+        const activeUserId = db.getRequestUserId() || db.getClinicUserId();
+        if (activeUserId) {
+          const clinicIdRow = await db.queryOne('SELECT clinic_id FROM profiles WHERE id = $1', [activeUserId]);
+          if (clinicIdRow && clinicIdRow.clinic_id) {
+            const cc = await db.queryOne('SELECT whatsapp_number FROM customer_control WHERE clinic_id = $1', [clinicIdRow.clinic_id]);
+            if (cc && cc.whatsapp_number) {
+              settings['whatsappNumber'] = cc.whatsapp_number;
+              settings['clinicPhones'] = cc.whatsapp_number;
+            }
+          }
+        }
+      }
     } catch (subErr) {
       // Safe fallback if table/columns don't exist on local SQLite
     }
