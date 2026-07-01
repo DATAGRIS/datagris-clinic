@@ -1,0 +1,9 @@
+{
+  "appId": "com.datagris.clinic",
+  "appName": "Clinic Operating System",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  }
+}
