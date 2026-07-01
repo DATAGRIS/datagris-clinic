@@ -1,0 +1,48 @@
+{
+  "screens": [
+    {
+      "name": "Login",
+      "access": "All",
+      "controls": [
+        "username",
+        "password",
+        "submit"
+      ]
+    },
+    {
+      "name": "ReceptionistDashboard",
+      "access": [
+        "owner",
+        "receptionist"
+      ],
+      "controls": [
+        "queue_table",
+        "patient_form",
+        "checkout_form"
+      ]
+    },
+    {
+      "name": "DoctorPortal",
+      "access": [
+        "owner",
+        "doctor"
+      ],
+      "controls": [
+        "vitals_panel",
+        "diagnostics_textarea",
+        "prescription_table",
+        "print_config"
+      ]
+    },
+    {
+      "name": "Settings",
+      "access": [
+        "owner"
+      ],
+      "controls": [
+        "logo_uploader",
+        "service_price_grid"
+      ]
+    }
+  ]
+}

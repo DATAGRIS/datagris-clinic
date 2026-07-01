@@ -1,0 +1,43 @@
+{
+  "roles": [
+    {
+      "name": "owner",
+      "allowed": [
+        "emr",
+        "financials",
+        "settings",
+        "payroll"
+      ]
+    },
+    {
+      "name": "doctor",
+      "allowed": [
+        "emr",
+        "templates"
+      ]
+    },
+    {
+      "name": "manager",
+      "allowed": [
+        "financials",
+        "settings",
+        "payroll",
+        "inventory"
+      ]
+    },
+    {
+      "name": "receptionist",
+      "allowed": [
+        "queue",
+        "checkout_register"
+      ]
+    },
+    {
+      "name": "accountant",
+      "allowed": [
+        "financials",
+        "payroll"
+      ]
+    }
+  ]
+}

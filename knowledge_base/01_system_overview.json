@@ -1,0 +1,16 @@
+{
+  "system_name": "EMR SaaS Clinic OS",
+  "goal": "High-performance isolated clinic management workflow",
+  "users": [
+    "owner",
+    "doctor",
+    "manager",
+    "receptionist",
+    "accountant"
+  ],
+  "architecture": {
+    "client": "Electron + React",
+    "server": "Express + Node.js",
+    "database": "Supabase PostgreSQL"
+  }
+}

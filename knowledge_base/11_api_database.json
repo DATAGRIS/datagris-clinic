@@ -1,0 +1,27 @@
+{
+  "apis": [
+    {
+      "route": "/api/checkout",
+      "method": "POST",
+      "desc": "SaaS licenses upgrade registration"
+    },
+    {
+      "route": "/api/reports/dashboard",
+      "method": "GET",
+      "desc": "Concurrent EMR reporting data"
+    },
+    {
+      "route": "/api/treasury/stats",
+      "method": "GET",
+      "desc": "Cash drawer session timelines"
+    }
+  ],
+  "entities": [
+    "clinics",
+    "profiles",
+    "patients",
+    "visits",
+    "treasury_sessions",
+    "inventory_items"
+  ]
+}

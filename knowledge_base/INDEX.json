@@ -1,0 +1,18 @@
+{
+  "description": "Central index mapping of the EMR SaaS Clinic OS Knowledge base.",
+  "files": [
+    "01_system_overview",
+    "02_screen_documentation",
+    "03_user_workflows",
+    "04_buttons_actions",
+    "05_forms",
+    "06_business_rules",
+    "07_permissions",
+    "08_reports_dashboards",
+    "09_search_notifications",
+    "10_error_settings",
+    "11_api_database",
+    "12_faq_synonyms",
+    "13_knowledge_graph"
+  ]
+}

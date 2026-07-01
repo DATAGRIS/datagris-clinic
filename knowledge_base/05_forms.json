@@ -1,0 +1,32 @@
+{
+  "forms": [
+    {
+      "name": "PatientForm",
+      "fields": [
+        "name",
+        "mobile",
+        "countryCode",
+        "age",
+        "gender"
+      ],
+      "validation": {
+        "name": "Required",
+        "mobile": "Digits only"
+      }
+    },
+    {
+      "name": "CheckoutForm",
+      "fields": [
+        "clinicName",
+        "doctorName",
+        "username",
+        "password",
+        "phone",
+        "countryCode"
+      ],
+      "validation": {
+        "password": "min_length_6"
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "errors": [
+    {
+      "msg": "patients_pkey violates unique constraint",
+      "fix": "Verify unique mobile input or use auto-generated ID"
+    },
+    {
+      "msg": "JID does not exist on WhatsApp",
+      "fix": "Prepend correct country code to phone number"
+    },
+    {
+      "msg": "Free trial rate limit 429",
+      "fix": "Upgrade WaSender license account"
+    }
+  ],
+  "settings": [
+    "clinicName",
+    "clinicPhones",
+    "whatsappEnabled",
+    "useInventory"
+  ]
+}

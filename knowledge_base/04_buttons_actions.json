@@ -1,0 +1,22 @@
+{
+  "actions": [
+    {
+      "name": "Summon",
+      "trigger": "Click",
+      "channel": "WebSocket",
+      "event": "SUMMON_RECEPTIONIST"
+    },
+    {
+      "name": "Print PDF",
+      "trigger": "Click",
+      "channel": "REST",
+      "route": "/api/whatsapp/send"
+    },
+    {
+      "name": "Open Session",
+      "trigger": "Click",
+      "channel": "REST",
+      "route": "/api/treasury/open"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "nodes": [
+    "Clinic",
+    "Subscription",
+    "Profile",
+    "Patient",
+    "Visit",
+    "Treasury",
+    "Inventory"
+  ],
+  "edges": [
+    {
+      "from": "Profile",
+      "to": "Patient",
+      "action": "Register"
+    },
+    {
+      "from": "Patient",
+      "to": "Visit",
+      "action": "Creates"
+    },
+    {
+      "from": "Visit",
+      "to": "Treasury",
+      "action": "Logs transaction"
+    },
+    {
+      "from": "Visit",
+      "to": "Inventory",
+      "action": "Deducts stock"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "business_rules": [
+    {
+      "name": "TenantIsolation",
+      "enforce": "clinic_id must match authenticated profile clinic_id"
+    },
+    {
+      "name": "FollowUpFreeWindow",
+      "default_days": 7,
+      "override": "is_exception_followup resets cost to 0"
+    },
+    {
+      "name": "InventoryAlert",
+      "condition": "quantity <= min_level"
+    },
+    {
+      "name": "TrialLimits",
+      "provider": "wasender",
+      "rate_limit": "1 message per minute"
+    }
+  ]
+}

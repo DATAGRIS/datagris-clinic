@@ -1,0 +1,33 @@
+{
+  "search": {
+    "patient": [
+      "name",
+      "mobile_number"
+    ],
+    "inventory": [
+      "barcode",
+      "name",
+      "category"
+    ]
+  },
+  "notifications": [
+    {
+      "type": "lowStock",
+      "trigger": "quantity <= min_level",
+      "target": [
+        "owner",
+        "manager"
+      ]
+    },
+    {
+      "type": "summon",
+      "trigger": "Doctor clicks call",
+      "target": "receptionist"
+    },
+    {
+      "type": "payroll",
+      "trigger": "Pay date approach",
+      "target": "owner"
+    }
+  ]
+}

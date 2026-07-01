@@ -1,0 +1,33 @@
+{
+  "synonyms": {
+    "كشف": [
+      "زيارة",
+      "فحص",
+      "consultation"
+    ],
+    "روشتة": [
+      "علاج",
+      "وصفة",
+      "prescription"
+    ],
+    "فاتورة": [
+      "إيصال",
+      "bill",
+      "invoice"
+    ],
+    "خزنة": [
+      "درج الكاشير",
+      "treasury"
+    ]
+  },
+  "faqs": [
+    {
+      "q": "How to register patient without phone?",
+      "a": "Leave phone empty, sequential ID is auto-assigned."
+    },
+    {
+      "q": "Why WhatsApp fails to send?",
+      "a": "Missing country code prefix. Select correct code dropdown first."
+    }
+  ]
+}

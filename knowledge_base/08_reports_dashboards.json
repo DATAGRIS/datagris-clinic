@@ -1,0 +1,21 @@
+{
+  "widgets": [
+    {
+      "title": "Net Revenue",
+      "equation": "SUM(paid_amount) - SUM(refund_amount)"
+    },
+    {
+      "title": "Net Profit",
+      "equation": "Gross Revenue - Expenses Vouchers"
+    },
+    {
+      "title": "Live Balance",
+      "equation": "Opening Balance + Income - Expense - Refund"
+    }
+  ],
+  "reports": [
+    "EmployeeRegistry",
+    "VisitsTimeline",
+    "TreasuryDiscrepancies"
+  ]
+}

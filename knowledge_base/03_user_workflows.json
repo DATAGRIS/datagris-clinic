@@ -1,0 +1,37 @@
+{
+  "workflows": [
+    {
+      "name": "PatientCheckin",
+      "start": "Register click",
+      "end": "Appeared in queue",
+      "steps": [
+        "Fill fields",
+        "Validate mobile",
+        "Create row",
+        "Trigger socket"
+      ]
+    },
+    {
+      "name": "DoctorExamination",
+      "start": "Summon clicked",
+      "end": "Checkout printed",
+      "steps": [
+        "Mark in_consultation",
+        "Type diagnosis",
+        "Select medicines",
+        "Save and PDF export"
+      ]
+    },
+    {
+      "name": "TreasuryShift",
+      "start": "Open drawer session",
+      "end": "Close drawer session",
+      "steps": [
+        "Log opening cash",
+        "Add transactions",
+        "Expected cash count",
+        "Log discrepancy"
+      ]
+    }
+  ]
+}
